@@ -157,7 +157,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 .marcadorDest{width:34px;height:34px;border-radius:50% 50% 50% 0;background:var(--oro);transform:rotate(-45deg);border:3px solid var(--azul);display:grid;place-items:center}
 .marcadorDest span{transform:rotate(45deg);font-weight:800;color:var(--azul);font-size:14px}
 .leaflet-container{font:inherit}
-.toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#14202E;color:#fff;padding:11px 16px;border-radius:12px;z-index:90;font-size:14px;max-width:90vw;text-align:center}
+.toast{pointer-events:none;position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#14202E;color:#fff;padding:11px 16px;border-radius:12px;z-index:90;font-size:14px;max-width:90vw;text-align:center}
 </style>
 </head>
 <body>
@@ -181,6 +181,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
       (Funciona en Android con la app instalada.) <a href="#" id="cerrarTip">Entendido</a>
     </div>
     <div class="buscador"><input id="buscarCliente" type="search" placeholder="Buscar cliente por nombre…" autocomplete="off"></div>
+    <button class="btn borde ancho oculto" id="btnRepetidos" style="margin-bottom:12px">🔁 Revisar posibles repetidos</button>
     <div class="lista" id="listaClientes"></div>
   </section>
 
@@ -237,7 +238,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v4';
+const APP_VERSION='v5';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -462,6 +463,7 @@ function pintarClientes(){
   const cont=$('#listaClientes');
   if(!clientes.length){ cont.innerHTML=`<div class="vacio"><div class="icono">👥</div>Aún no tienes clientes registrados.<br>Toca <b>+ Nuevo cliente</b> o comparte tu ubicación desde Google Maps.</div>`; return; }
   if(!lista.length){ cont.innerHTML=`<div class="vacio">No hay clientes que coincidan con “${esc($('#buscarCliente').value)}”.</div>`; return; }
+  $('#btnRepetidos').classList.toggle('oculto',clientes.length<2||!!q);
   const MAX=150, visibles=lista.slice(0,MAX);
   const cuenta=`<div style="color:var(--suave);font-size:13px;margin:-4px 0 4px">${q?`${lista.length} encontrado(s)`:`${clientes.length} clientes`}${lista.length>MAX?` · mostrando ${MAX}, escribe el nombre para buscar`:''}</div>`;
   cont.innerHTML=cuenta+visibles.map(c=>`<button class="cliente" data-id="${c.id}">${miniatura(c)}
@@ -494,7 +496,7 @@ function mapaChico(el,pos,arrastrable,alMover){
 }
 
 /* Formulario: nuevo o editar. inicial puede traer {nombre, lat, lng, enlace, nota} */
-function formCliente(existente=null,inicial={}){
+function formCliente(existente=null,inicial={},alGuardar=null){
   const c=existente?{...existente}:{id:uid(),nombre:'',telefono:'',referencia:'',lat:null,lng:null,foto:null,enlace:'',creado:new Date().toISOString(),...inicial};
   const h=abrirHoja(existente?'Editar cliente':'Nuevo cliente',`
     ${inicial._aviso?`<div class="aviso info">${inicial._aviso}</div>`:''}
@@ -557,6 +559,7 @@ function formCliente(existente=null,inicial={}){
     await DB.poner('clientes',c);
     const i=clientes.findIndex(x=>x.id===c.id); if(i>=0) clientes[i]=c; else clientes.push(c);
     h.remove(); document.querySelectorAll('.hoja').forEach(x=>x.remove());
+    if(alGuardar){ toast('Ubicación del cliente actualizada'); alGuardar(c); return; }
     toast(existente?'Cliente actualizado':'Cliente guardado');
     pintarClientes(); if(tabActual==='ruta') pintarArmado();
   };
@@ -731,12 +734,16 @@ function iniciarNavegacion(id,reanudando=false){
         <button class="btn rojo" id="nCancelar">Cancelar cobro</button>
         <button class="btn verde" id="nLlegue">Ya llegué</button>
       </div>
-      <button class="btn claro ancho" id="nTerminar" style="margin-top:8px;min-height:40px">Terminar ruta</button>
+      <div class="fila" style="margin-top:8px">
+        <button class="btn claro" id="nCorregir" style="min-height:40px">📍 Corregir ubicación</button>
+        <button class="btn claro" id="nTerminar" style="min-height:40px">Terminar ruta</button>
+      </div>
     </div>`);
   $('#nVolver').onclick=async()=>{ if(await confirmar('Cambiar de cliente','¿Dejar este destino y elegir otro cliente de la lista? (seguirá pendiente)','Elegir otro')) mostrarEleccion(); };
   $('#nCancelar').onclick=async()=>{ const m=await pedirMotivo(c.nombre); if(m) cancelarCobro(c,m); };
   $('#nLlegue').onclick=()=>llegada(c,true);
   $('#nTerminar').onclick=terminarRutaManual;
+  $('#nCorregir').onclick=()=>corregirUbicacion(c);
   $('#bannerX').onclick=()=>$('#banner').classList.add('oculto');
 
   NAV={c,seguir:true,llegado:false,ultimoCalc:0,posCalc:null,eta:null,watch:null,map:null,yo:null,linea:null,consultando:false};
@@ -813,6 +820,124 @@ async function alMoverse(p){
   }
 }
 
+/* ---- Corregir la ubicación del cliente durante la ruta ---- */
+async function guardarUbicacion(c,p){
+  const nuevo={...cliente(c.id),lat:p.lat,lng:p.lng};
+  await DB.poner('clientes',nuevo);
+  clientes[clientes.findIndex(x=>x.id===c.id)]=nuevo;
+  return nuevo;
+}
+async function corregirUbicacion(c){
+  const op=await dialogo({titulo:'Corregir ubicación',texto:`¿Cómo quieres corregir la ubicación de <b>${esc(c.nombre)}</b>?`,
+    botones:[{txt:'📍 Estoy en su casa: usar mi ubicación actual',clase:'oro',valor:'aqui'},
+             {txt:'🗺️ Mover el pin en el mapa',clase:'claro',valor:'mapa'},
+             {txt:'Cancelar',clase:'claro',valor:null}]});
+  if(op==='aqui'){
+    let p=NAV&&NAV.ultimaPos;
+    try{ p=await obtenerPosicion(); }catch(e){ if(!p){ toast(e.message,4000); return; } }
+    await guardarUbicacion(c,p); toast('Ubicación del cliente actualizada');
+    iniciarNavegacion(c.id,true);
+  }else if(op==='mapa'){
+    formCliente(cliente(c.id),{},()=>iniciarNavegacion(c.id,true));
+  }
+}
+async function ofrecerGuardarAqui(c){
+  let p=NAV&&NAV.ultimaPos;
+  if(!p){ try{ p=await obtenerPosicion(8000); }catch(e){ return; } }
+  if(c.lat==null){
+    if(await confirmar('Guardar ubicación',`<b>${esc(c.nombre)}</b> no tenía ubicación. ¿Guardar donde estás ahora como su casa?`,'Sí, guardar aquí')) await guardarUbicacion(c,p);
+    return;
+  }
+  const d=distancia(p,c);
+  if(d>120 && await confirmar('¿El pin estaba mal?',`Estás a <b>${textoDist(d)}</b> de donde estaba marcada la casa de <b>${esc(c.nombre)}</b>. ¿Guardar tu ubicación actual como la correcta?`,'Sí, corregir')) await guardarUbicacion(c,p);
+}
+
+/* ---- Posibles clientes repetidos (nombre parecido y casa a menos de 200 m) ---- */
+function parecido(a,b){
+  if(a===b) return 1;
+  const m=a.length,n=b.length; if(!m||!n) return 0;
+  let prev=Array.from({length:n+1},(_,j)=>j);
+  for(let i=1;i<=m;i++){ const cur=[i]; for(let j=1;j<=n;j++) cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1)); prev=cur; }
+  return 1-prev[n]/Math.max(m,n);
+}
+const DIST_KEY='ga_distintos';
+const distintos=()=>{ try{ return new Set(JSON.parse(localStorage.getItem(DIST_KEY))||[]); }catch(e){ return new Set(); } };
+const clavePar=(a,b)=>[a,b].sort().join('|');
+function buscarRepetidos(){
+  const ya=distintos(), celdas=new Map(), pares=[];
+  const con=clientes.filter(c=>c.lat!=null).map(c=>({c,n:norm(c.nombre).replace(/\./g,''),i:Math.floor(c.lat/0.002),j:Math.floor(c.lng/0.002)}));
+  con.forEach(x=>{ const k=x.i+','+x.j; if(!celdas.has(k)) celdas.set(k,[]); celdas.get(k).push(x); });
+  for(const a of con){
+    for(let di=-1;di<=1;di++) for(let dj=-1;dj<=1;dj++){
+      for(const b of celdas.get((a.i+di)+','+(a.j+dj))||[]){
+        if(b.c.id<=a.c.id) continue;
+        const d=distancia(a.c,b.c); if(d>200) continue;
+        if(ya.has(clavePar(a.c.id,b.c.id))) continue;
+        const r=parecido(a.n,b.n), wa=new Set(a.n.split(' ')), comunes=b.n.split(' ').filter(w=>wa.has(w)).length;
+        if(r>=0.82 || (comunes>=2 && r>=0.6)) pares.push({a:a.c,b:b.c,r,d});
+      }
+    }
+  }
+  return pares.sort((x,y)=>y.r-x.r||x.d-y.d);
+}
+async function unirClientes(queda,sale){
+  const u={...queda,
+    telefono:queda.telefono||sale.telefono||'', referencia:queda.referencia||sale.referencia||'',
+    foto:queda.foto||sale.foto||null, enlace:queda.enlace||sale.enlace||''};
+  if(u.lat==null && sale.lat!=null){ u.lat=sale.lat; u.lng=sale.lng; }
+  if(queda.visitas||sale.visitas){ u.visitas=(queda.visitas||0)+(sale.visitas||0); u.ultimaVisita=[queda.ultimaVisita,sale.ultimaVisita].filter(Boolean).sort().pop(); }
+  await DB.poner('clientes',u); await DB.borrar('clientes',sale.id);
+  clientes=clientes.filter(x=>x.id!==sale.id); clientes[clientes.findIndex(x=>x.id===u.id)]=u;
+  const cambia=arr=>[...new Set(arr.map(id=>id===sale.id?u.id:id))];
+  R.lista=cambia(R.lista); R.pendientes=cambia(R.pendientes); if(R.actual===sale.id) R.actual=u.id; guardarRuta();
+}
+function revisarRepetidos(){
+  let pares=buscarRepetidos(), i=0, unidos=0;
+  const h=abrirHoja('Posibles repetidos','<div id="rpCuerpo"></div>');
+  const cuerpo=h.querySelector('#rpCuerpo');
+  const tarjeta=(c,color)=>`<div class="tarjeta" style="border-left:6px solid ${color};margin-bottom:8px;padding:10px 12px">
+      <b>${esc(c.nombre)}</b><br><small style="color:var(--suave)">${c.visitas?`${c.visitas} visita(s) · última ${new Date(c.ultimaVisita+'T12:00').toLocaleDateString('es-MX')}`:'Registrado en la app'}${c.telefono?' · 📞 '+esc(c.telefono):''}</small></div>`;
+  const pintar=()=>{
+    while(i<pares.length && (!cliente(pares[i].a.id)||!cliente(pares[i].b.id))) i++;
+    if(i>=pares.length){
+      cuerpo.innerHTML=`<div class="vacio"><div class="icono">✅</div>Ya no hay posibles repetidos por revisar.${unidos?`<br>Uniste ${unidos} cliente(s).`:''}</div>
+        <button class="btn oro ancho" id="rpListo">Listo</button>`;
+      cuerpo.querySelector('#rpListo').onclick=()=>{ h.remove(); pintarClientes(); };
+      return;
+    }
+    const {a,b,d}=pares[i];
+    const A=cliente(a.id), B=cliente(b.id);
+    cuerpo.innerHTML=`<p style="margin:0 0 10px;color:var(--suave)">${i+1} de ${pares.length} · las casas están a ${textoDist(d)} una de otra</p>
+      ${tarjeta(A,'#F2B134')}${tarjeta(B,'#2D7FF9')}
+      <div class="mapaForm" id="rpMapa" style="margin:4px 0 12px"></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn oro" data-q="a">Unir y dejar «${esc(A.nombre)}»</button>
+        <button class="btn claro" data-q="b">Unir y dejar «${esc(B.nombre)}»</button>
+        <div class="fila"><button class="btn rojo" id="rpDistintos">Son personas distintas</button><button class="btn borde" id="rpSaltar">Saltar</button></div>
+      </div>`;
+    if(hayMapa()){
+      const m=L.map(cuerpo.querySelector('#rpMapa'),{zoomControl:false});
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(m);
+      const pin=(c,col)=>L.circleMarker([c.lat,c.lng],{radius:10,color:'#fff',weight:3,fillColor:col,fillOpacity:1}).addTo(m);
+      pin(B,'#2D7FF9'); pin(A,'#F2B134');
+      m.fitBounds([[A.lat,A.lng],[B.lat,B.lng]],{padding:[50,50],maxZoom:18});
+      setTimeout(()=>m.invalidateSize(),200);
+    }
+    cuerpo.querySelectorAll('[data-q]').forEach(btn=>btn.onclick=async()=>{
+      const queda=btn.dataset.q==='a'?A:B, sale=btn.dataset.q==='a'?B:A;
+      await unirClientes(queda,sale); unidos++; i++; toast('Clientes unidos'); pintar();
+    });
+    cuerpo.querySelector('#rpDistintos').onclick=()=>{
+      const s=distintos(); s.add(clavePar(A.id,B.id)); try{ localStorage.setItem(DIST_KEY,JSON.stringify([...s])); }catch(e){}
+      i++; pintar();
+    };
+    cuerpo.querySelector('#rpSaltar').onclick=()=>{ i++; pintar(); };
+  };
+  if(!pares.length){ cuerpo.innerHTML='<div class="vacio"><div class="icono">✅</div>No encontré clientes repetidos.</div>'; return; }
+  pintar();
+}
+$('#btnRepetidos').onclick=revisarRepetidos;
+
 function detenerNavegacion(){
   if(!NAV) return;
   if(NAV.watch!=null && navigator.geolocation) navigator.geolocation.clearWatch(NAV.watch);
@@ -824,6 +949,7 @@ async function llegada(c,manual){
   if(!NAV||NAV.llegado) return;
   NAV.llegado=true;
   if(!manual){ campana(); hablar(`Llegamos al destino. ¿Te pagó ${c.nombre}?`); }
+  else { await ofrecerGuardarAqui(c); c=cliente(c.id)||c; }
   const r=await dialogo({
     titulo:'📍 Llegamos al destino', texto:`¿Te pagó <b>${esc(c.nombre)}</b>?`,
     html:`<label class="campo"><span>Cantidad cobrada</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off"></label>`,
