@@ -164,7 +164,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 
 <header>
   <div class="logo">GA</div>
-  <div class="marca"><b>Grupo Alfa Cobranza</b><span id="subtitulo">Ruta de cobranza</span></div>
+  <div class="marca"><b>Grupo Alfa Cobranza</b><span id="subtitulo">Ruta de cobranza · <span id="versionApp"></span></span></div>
   <button id="btnInstalar" class="oculto">Instalar</button>
   <div class="hoy"><small>Cobrado hoy</small><b id="totalHoy">$0.00</b></div>
 </header>
@@ -236,6 +236,9 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 'use strict';
+/* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
+const APP_VERSION='v3';
+document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
 const fmt = n => new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(Number(n)||0);
