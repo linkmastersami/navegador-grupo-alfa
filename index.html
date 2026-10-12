@@ -237,7 +237,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v3';
+const APP_VERSION='v4';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -387,6 +387,7 @@ const DB={
     r.onsuccess=()=>{DB.db=r.result;res();}; r.onerror=()=>rej(r.error);});},
   todos(st){ return new Promise((res,rej)=>{const q=DB.db.transaction(st).objectStore(st).getAll(); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error);});},
   poner(st,v){ return new Promise((res,rej)=>{const t=DB.db.transaction(st,'readwrite'); t.objectStore(st).put(v); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error);});},
+  ponerVarios(st,arr){ return new Promise((res,rej)=>{const t=DB.db.transaction(st,'readwrite'); const o=t.objectStore(st); arr.forEach(v=>o.put(v)); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error);});},
   borrar(st,id){ return new Promise((res,rej)=>{const t=DB.db.transaction(st,'readwrite'); t.objectStore(st).delete(id); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error);});}
 };
 let clientes=[], rutas=[];
@@ -461,7 +462,9 @@ function pintarClientes(){
   const cont=$('#listaClientes');
   if(!clientes.length){ cont.innerHTML=`<div class="vacio"><div class="icono">👥</div>Aún no tienes clientes registrados.<br>Toca <b>+ Nuevo cliente</b> o comparte tu ubicación desde Google Maps.</div>`; return; }
   if(!lista.length){ cont.innerHTML=`<div class="vacio">No hay clientes que coincidan con “${esc($('#buscarCliente').value)}”.</div>`; return; }
-  cont.innerHTML=lista.map(c=>`<button class="cliente" data-id="${c.id}">${miniatura(c)}
+  const MAX=150, visibles=lista.slice(0,MAX);
+  const cuenta=`<div style="color:var(--suave);font-size:13px;margin:-4px 0 4px">${q?`${lista.length} encontrado(s)`:`${clientes.length} clientes`}${lista.length>MAX?` · mostrando ${MAX}, escribe el nombre para buscar`:''}</div>`;
+  cont.innerHTML=cuenta+visibles.map(c=>`<button class="cliente" data-id="${c.id}">${miniatura(c)}
     <div class="datos"><b>${esc(c.nombre)}</b><small>${c.lat!=null?'📍 Con ubicación':'<span class="chip rojo">Sin ubicación</span>'}${c.telefono?' · 📞 '+esc(c.telefono):''}</small></div>
     ${R.lista.includes(c.id)?'<span class="chip oro accion">En ruta</span>':''}</button>`).join('');
   cont.querySelectorAll('.cliente').forEach(b=>b.onclick=()=>verCliente(b.dataset.id));
@@ -569,6 +572,7 @@ function verCliente(id){
       <div class="renglon"><div class="izq"><small>Nombre</small>${esc(c.nombre)}</div></div>
       ${c.telefono?`<div class="renglon"><div class="izq"><small>Teléfono</small><a href="tel:${esc(c.telefono)}">${esc(c.telefono)}</a></div></div>`:''}
       ${c.referencia?`<div class="renglon"><div class="izq"><small>Referencias</small>${esc(c.referencia)}</div></div>`:''}
+      ${c.visitas?`<div class="renglon"><div class="izq"><small>Historial (importado de WhatsApp)</small>${c.visitas} visita(s) · última: ${new Date(c.ultimaVisita+'T12:00').toLocaleDateString('es-MX')}</div></div>`:''}
       <div class="renglon"><div class="izq"><small>Ubicación</small>${c.lat!=null?`${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`:'Sin ubicación'}</div></div>
     </div>
     ${c.lat!=null?'<div class="mapaForm" id="vMapa" style="margin-bottom:12px"></div>':''}
@@ -913,11 +917,27 @@ $('#archivoImportar').onchange=async e=>{
   try{
     const d=JSON.parse(await f.text());
     if(d.app!=='grupo-alfa-cobranza') throw new Error('Ese archivo no es un respaldo de esta app');
-    if(!(await confirmar('Cargar respaldo',`Se agregarán ${d.clientes.length} cliente(s) y ${d.rutas.length} ruta(s). Los que ya existan se actualizarán.`,'Cargar'))) return;
-    for(const c of d.clientes){ await DB.poner('clientes',c); }
-    for(const r of d.rutas){ await DB.poner('rutas',r); }
+    if(!Array.isArray(d.clientes)||!Array.isArray(d.rutas)) throw new Error('El archivo está incompleto');
+    // Un cliente que ya tienes con el mismo nombre no se duplica: se conserva el tuyo (y se le pone ubicación si no tenía)
+    const porNombre=new Map(clientes.map(c=>[norm(c.nombre),c]));
+    const nuevos=[], actualizados=[]; let repetidos=0;
+    for(const c of d.clientes){
+      if(!c||!c.id||!c.nombre) continue;
+      const mismo=clientes.find(x=>x.id===c.id) || porNombre.get(norm(c.nombre));
+      if(!mismo){ nuevos.push(c); porNombre.set(norm(c.nombre),c); continue; }
+      if(mismo.id===c.id){ actualizados.push(c); continue; }
+      repetidos++;
+      if(mismo.lat==null && c.lat!=null) actualizados.push({...mismo,lat:c.lat,lng:c.lng});
+    }
+    const texto=`Se agregarán <b>${nuevos.length}</b> cliente(s) nuevo(s)`+
+      (actualizados.length?`, se actualizarán ${actualizados.length}`:'')+
+      (repetidos?` y ${repetidos} ya los tienes con el mismo nombre (se conservan los tuyos)`:'')+
+      (d.rutas.length?`. También ${d.rutas.length} ruta(s) del historial`:'')+'.';
+    if(!(await confirmar('Cargar respaldo',texto,'Cargar'))) return;
+    await DB.ponerVarios('clientes',[...nuevos,...actualizados]);
+    await DB.ponerVarios('rutas',d.rutas);
     clientes=await DB.todos('clientes'); rutas=await DB.todos('rutas');
-    toast('Respaldo cargado'); pintarHistorial(); pintarTotal();
+    toast(`Listo: ${nuevos.length} cliente(s) agregado(s)`,3500); pintarClientes(); pintarHistorial(); pintarTotal();
   }catch(err){ toast('No se pudo cargar: '+err.message,4000); }
 };
 
