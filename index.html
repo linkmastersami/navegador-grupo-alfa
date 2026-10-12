@@ -1,0 +1,941 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E2A47">
+<title>Grupo Alfa Cobranza</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --azul:#0E2A47; --azul2:#163B63; --oro:#F2B134; --oro2:#D9952A;
+  --fondo:#F2F4F7; --tarjeta:#FFFFFF; --texto:#14202E; --suave:#5E6B7A; --linea:#E1E6EC;
+  --verde:#1E9E5A; --rojo:#D64545; --radio:16px;
+  --sombra:0 2px 10px rgba(14,42,71,.08);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--fondo);color:var(--texto);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-size:16px}
+button{font:inherit;cursor:pointer;border:0}
+input,textarea{font:inherit}
+.oculto{display:none!important}
+
+/* Encabezado */
+header{position:sticky;top:0;z-index:20;background:var(--azul);color:#fff;
+  padding:calc(env(safe-area-inset-top) + 12px) 16px 12px;display:flex;align-items:center;gap:12px}
+.logo{width:38px;height:38px;border-radius:10px;background:var(--oro);color:var(--azul);
+  display:grid;place-items:center;font-weight:800;font-size:16px;flex:none}
+.marca{flex:1;min-width:0}
+.marca b{display:block;font-size:17px;letter-spacing:.2px}
+.marca span{font-size:13px;opacity:.8}
+.hoy{text-align:right}
+.hoy small{display:block;font-size:11px;opacity:.75;text-transform:uppercase;letter-spacing:.6px}
+.hoy b{font-size:17px;color:var(--oro)}
+#btnInstalar{background:var(--oro);color:var(--azul);font-weight:700;border-radius:999px;padding:7px 12px;font-size:13px}
+
+main{padding:16px 16px calc(96px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto}
+h2{font-size:20px;margin:4px 0 12px}
+h3{font-size:16px;margin:18px 0 8px}
+
+/* Navegación inferior */
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:#fff;border-top:1px solid var(--linea);
+  display:flex;padding-bottom:env(safe-area-inset-bottom)}
+nav.tabs button{flex:1;background:none;padding:10px 4px 9px;color:var(--suave);font-size:12px;display:flex;
+  flex-direction:column;align-items:center;gap:3px}
+nav.tabs button svg{width:24px;height:24px}
+nav.tabs button.activa{color:var(--azul);font-weight:700}
+nav.tabs button.activa svg{stroke:var(--oro2)}
+
+/* Elementos comunes */
+.tarjeta{background:var(--tarjeta);border-radius:var(--radio);box-shadow:var(--sombra);padding:14px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:12px;padding:13px 16px;
+  font-weight:700;background:var(--azul);color:#fff;min-height:48px}
+.btn.oro{background:var(--oro);color:var(--azul)}
+.btn.claro{background:#E8EDF3;color:var(--azul)}
+.btn.rojo{background:#FBE9E9;color:var(--rojo)}
+.btn.verde{background:var(--verde);color:#fff}
+.btn.borde{background:#fff;color:var(--azul);border:1.5px solid var(--linea)}
+.btn.ancho{width:100%}
+.btn:disabled{opacity:.45}
+.fila{display:flex;gap:10px;align-items:center}
+.fila>.btn{flex:1}
+.campo{display:block;margin-bottom:14px}
+.campo>span{display:block;font-size:13px;color:var(--suave);margin-bottom:6px;font-weight:600}
+.campo input,.campo textarea,.buscador input{width:100%;border:1.5px solid var(--linea);border-radius:12px;padding:12px 14px;
+  background:#fff;color:var(--texto);outline:none}
+.campo input:focus,.campo textarea:focus,.buscador input:focus{border-color:var(--azul2)}
+.opcional{font-weight:400;color:#8A96A3}
+.vacio{text-align:center;color:var(--suave);padding:28px 12px}
+.vacio .icono{font-size:40px;margin-bottom:6px}
+.aviso{background:#FFF6E3;border:1px solid #F5DDA6;color:#6B4C0B;border-radius:12px;padding:10px 12px;font-size:14px;margin-bottom:12px}
+.aviso.info{background:#EAF2FB;border-color:#C9DCF2;color:#1B3D63}
+.chip{display:inline-block;font-size:12px;padding:3px 8px;border-radius:999px;background:#EEF1F5;color:var(--suave)}
+.chip.oro{background:#FDF0D3;color:#7A520C}
+.chip.rojo{background:#FBE9E9;color:var(--rojo)}
+.chip.verde{background:#E3F5EB;color:#14703F}
+
+/* Lista de clientes */
+.lista{display:flex;flex-direction:column;gap:10px}
+.cliente{display:flex;gap:12px;align-items:center;background:#fff;border-radius:14px;padding:10px;box-shadow:var(--sombra);width:100%;text-align:left;color:inherit}
+.mini{width:56px;height:56px;border-radius:12px;background:#E8EDF3 center/cover no-repeat;flex:none;display:grid;place-items:center;color:#9AA6B2;font-size:22px}
+.cliente .datos{flex:1;min-width:0}
+.cliente .datos b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cliente .datos small{color:var(--suave);font-size:13px}
+.cliente .accion{flex:none}
+.buscador{position:relative;margin-bottom:12px}
+.sugerencias{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#fff;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:10;max-height:300px;overflow:auto}
+.sugerencias button{display:flex;width:100%;text-align:left;background:none;padding:12px 14px;border-bottom:1px solid var(--linea);gap:8px;align-items:center;color:var(--texto)}
+.sugerencias button:disabled{color:#A0AAB5}
+
+/* Hojas a pantalla completa */
+.hoja{position:fixed;inset:0;z-index:40;background:var(--fondo);display:flex;flex-direction:column}
+.hoja .barra{background:var(--azul);color:#fff;padding:calc(env(safe-area-inset-top) + 10px) 8px 10px;display:flex;align-items:center;gap:6px}
+.hoja .barra b{flex:1;font-size:17px}
+.hoja .barra button{background:none;color:#fff;padding:8px 10px;font-size:15px;border-radius:10px}
+.hoja .cuerpo{flex:1;overflow:auto;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}
+.mapaForm{height:230px;border-radius:14px;overflow:hidden;border:1.5px solid var(--linea);background:#DDE3EA}
+.foto{width:100%;max-height:260px;object-fit:cover;border-radius:14px;display:block}
+.fotoVacia{height:120px;border:2px dashed var(--linea);border-radius:14px;display:grid;place-items:center;color:var(--suave);background:#fff}
+
+/* Diálogos */
+.velo{position:fixed;inset:0;z-index:60;background:rgba(10,20,35,.55);display:flex;align-items:flex-end;justify-content:center}
+.dialogo{background:#fff;width:100%;max-width:520px;border-radius:22px 22px 0 0;padding:20px 18px calc(18px + env(safe-area-inset-bottom));
+  max-height:92vh;overflow:auto;animation:sube .2s ease-out}
+@keyframes sube{from{transform:translateY(30px);opacity:0}to{transform:none;opacity:1}}
+.dialogo h3{margin:0 0 6px;font-size:19px}
+.dialogo p{margin:0 0 14px;color:var(--suave)}
+.dialogo .botones{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.motivos{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.motivos button{background:#EEF1F5;color:var(--texto);border-radius:999px;padding:9px 13px;font-size:14px}
+.motivos button.sel{background:var(--azul);color:#fff}
+.monto{font-size:30px!important;font-weight:800;text-align:center}
+
+/* Pantalla de ruta */
+#ruta{position:fixed;inset:0;z-index:30;background:var(--fondo);display:flex;flex-direction:column}
+#mapaNav{flex:1;background:#DDE3EA}
+.panelNav{background:#fff;border-radius:22px 22px 0 0;box-shadow:0 -6px 20px rgba(0,0,0,.12);padding:14px 16px calc(14px + env(safe-area-inset-bottom));margin-top:-18px;position:relative;z-index:500}
+.destino{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.destino .datos{flex:1;min-width:0}
+.destino b{font-size:18px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eta{display:flex;gap:16px;margin-top:2px;color:var(--suave);font-size:14px}
+.eta strong{color:var(--azul);font-size:20px}
+.topNav{position:absolute;top:calc(env(safe-area-inset-top) + 10px);left:10px;right:10px;z-index:600;display:flex;gap:8px;align-items:flex-start}
+.pildora{background:var(--azul);color:#fff;border-radius:999px;padding:8px 14px;font-size:14px;box-shadow:var(--sombra)}
+.pildora b{color:var(--oro)}
+.redondo{width:46px;height:46px;border-radius:50%;background:#fff;color:var(--azul);box-shadow:var(--sombra);display:grid;place-items:center;font-size:20px;flex:none}
+#banner{position:absolute;left:10px;right:10px;top:calc(env(safe-area-inset-top) + 64px);z-index:650;background:var(--oro);color:var(--azul);
+  border-radius:16px;padding:14px;font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.2);display:flex;gap:10px;align-items:center}
+#banner .t{flex:1}
+.eleccion{flex:1;overflow:auto;padding:calc(env(safe-area-inset-top) + 16px) 16px calc(20px + env(safe-area-inset-bottom))}
+.opcion{display:flex;gap:12px;align-items:center;background:#fff;border-radius:16px;padding:12px;box-shadow:var(--sombra);margin-bottom:10px;width:100%;text-align:left;color:inherit;border:2px solid transparent}
+.opcion.primera{border-color:var(--oro)}
+.opcion .datos{flex:1;min-width:0}
+.opcion .datos b{display:block;font-size:17px}
+.opcion .datos small{color:var(--suave)}
+.opcion .ir{background:var(--azul);color:#fff;border-radius:12px;padding:10px 14px;font-weight:700}
+.cargando{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;flex:1;color:var(--suave);padding:40px}
+.giro{width:42px;height:42px;border:4px solid #D6DEE7;border-top-color:var(--oro);border-radius:50%;animation:gira 1s linear infinite}
+@keyframes gira{to{transform:rotate(360deg)}}
+
+/* Resumen */
+.total{background:var(--azul);color:#fff;border-radius:18px;padding:18px;text-align:center;margin-bottom:14px}
+.total small{opacity:.8;text-transform:uppercase;letter-spacing:.8px;font-size:12px}
+.total b{display:block;font-size:34px;color:var(--oro);margin-top:4px}
+.renglon{display:flex;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--linea)}
+.renglon:last-child{border-bottom:0}
+.renglon .izq{min-width:0}
+.renglon .izq small{display:block;color:var(--suave);font-size:13px}
+.renglon .der{font-weight:800;white-space:nowrap}
+.ruta-hist{display:flex;justify-content:space-between;align-items:center;width:100%;background:#fff;border-radius:14px;padding:12px 14px;box-shadow:var(--sombra);text-align:left;color:inherit;margin-bottom:10px}
+.ruta-hist small{display:block;color:var(--suave);font-size:13px}
+.ruta-hist b.monto2{color:var(--verde);font-size:17px}
+
+.marcadorYo{width:20px;height:20px;border-radius:50%;background:#2D7FF9;border:3px solid #fff;box-shadow:0 0 0 6px rgba(45,127,249,.25)}
+.marcadorDest{width:34px;height:34px;border-radius:50% 50% 50% 0;background:var(--oro);transform:rotate(-45deg);border:3px solid var(--azul);display:grid;place-items:center}
+.marcadorDest span{transform:rotate(45deg);font-weight:800;color:var(--azul);font-size:14px}
+.leaflet-container{font:inherit}
+.toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#14202E;color:#fff;padding:11px 16px;border-radius:12px;z-index:90;font-size:14px;max-width:90vw;text-align:center}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">GA</div>
+  <div class="marca"><b>Grupo Alfa Cobranza</b><span id="subtitulo">Ruta de cobranza</span></div>
+  <button id="btnInstalar" class="oculto">Instalar</button>
+  <div class="hoy"><small>Cobrado hoy</small><b id="totalHoy">$0.00</b></div>
+</header>
+
+<main>
+  <!-- CLIENTES -->
+  <section id="tab-clientes">
+    <div class="fila" style="margin-bottom:12px">
+      <h2 style="flex:1;margin:0">Clientes</h2>
+      <button class="btn oro" id="btnNuevo">+ Nuevo cliente</button>
+    </div>
+    <div class="aviso info oculto" id="tipCompartir">
+      <b>Tip:</b> estando en la casa del cliente, abre Google Maps, toca tu punto azul → <b>Compartir</b> → <b>Alfa Cobranza</b>. La app abrirá el registro con esa ubicación.
+      (Funciona en Android con la app instalada.) <a href="#" id="cerrarTip">Entendido</a>
+    </div>
+    <div class="buscador"><input id="buscarCliente" type="search" placeholder="Buscar cliente por nombre…" autocomplete="off"></div>
+    <div class="lista" id="listaClientes"></div>
+  </section>
+
+  <!-- RUTA -->
+  <section id="tab-ruta" class="oculto">
+    <h2>Lista de cobranza</h2>
+    <div id="rutaActiva" class="oculto"></div>
+    <div id="armado">
+      <div class="buscador">
+        <input id="agregarRuta" type="search" placeholder="Escribe el nombre del cliente para agregarlo…" autocomplete="off">
+        <div class="sugerencias oculto" id="sugerencias"></div>
+      </div>
+      <div class="lista" id="listaRuta"></div>
+      <div style="margin-top:16px" class="fila">
+        <button class="btn claro" id="btnVaciar">Vaciar lista</button>
+        <button class="btn oro" id="btnIniciar">Iniciar ruta</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- HISTORIAL -->
+  <section id="tab-historial" class="oculto">
+    <h2>Historial</h2>
+    <div class="total"><small>Total cobrado hoy</small><b id="totalHoy2">$0.00</b></div>
+    <div id="listaHist"></div>
+    <h3>Respaldo de datos</h3>
+    <div class="tarjeta">
+      <p style="margin:0 0 12px;color:var(--suave);font-size:14px">Tus clientes y cobros se guardan solo en este teléfono. Haz un respaldo de vez en cuando para no perderlos si cambias de teléfono.</p>
+      <div class="fila">
+        <button class="btn claro" id="btnExportar">Guardar respaldo</button>
+        <button class="btn claro" id="btnImportar">Cargar respaldo</button>
+      </div>
+      <input type="file" id="archivoImportar" accept="application/json,.json" class="oculto">
+    </div>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button data-tab="clientes" class="activa">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-7 7-7s7 3 7 7"/><path d="M17 11h6M20 8v6"/></svg>
+    Clientes</button>
+  <button data-tab="ruta">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H16a3.5 3.5 0 0 0 0-7H8a3.5 3.5 0 0 1 0-7h7.5"/></svg>
+    Ruta</button>
+  <button data-tab="historial">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14h5"/></svg>
+    Historial</button>
+</nav>
+
+<!-- Pantalla de ruta (elección / navegación) -->
+<div id="ruta" class="oculto"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+'use strict';
+/* ================= Utilidades ================= */
+const $ = s => document.querySelector(s);
+const fmt = n => new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(Number(n)||0);
+const norm = s => (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+const esc = s => String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const hora = iso => new Date(iso).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+const fechaLarga = iso => new Date(iso).toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
+const mismoDia = (a,b) => { a=new Date(a); b=new Date(b); return a.toDateString()===b.toDateString(); };
+const hayMapa = () => typeof L !== 'undefined';
+const CENTRO_DEFECTO = {lat:19.4326,lng:-99.1332};
+
+function distancia(a,b){ // metros
+  const R=6371000, r=x=>x*Math.PI/180;
+  const dLat=r(b.lat-a.lat), dLng=r(b.lng-a.lng);
+  const h=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+const textoDist = m => m<1000 ? Math.round(m)+' m' : (m/1000).toFixed(m<10000?1:0)+' km';
+const textoMin = s => { const m=Math.max(1,Math.round(s/60)); return m<60 ? m+' min' : Math.floor(m/60)+' h '+(m%60)+' min'; };
+const estimarSegundos = m => (m*1.35)/(22/3.6); // calle ~22 km/h si no hay servidor de rutas
+
+function toast(msg,ms=2600){
+  const t=document.createElement('div'); t.className='toast'; t.textContent=msg;
+  document.body.appendChild(t); setTimeout(()=>t.remove(),ms);
+}
+
+function obtenerPosicion(timeout=15000){
+  return new Promise((res,rej)=>{
+    if(!navigator.geolocation) return rej(new Error('Este teléfono no permite usar el GPS.'));
+    navigator.geolocation.getCurrentPosition(
+      p=>res({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),
+      e=>rej(new Error(e.code===1?'Permiso de ubicación denegado. Actívalo en los ajustes del navegador.':'No se pudo obtener tu ubicación.')),
+      {enableHighAccuracy:true,timeout,maximumAge:15000});
+  });
+}
+
+async function pedirJSON(url,ms=9000){
+  const c=new AbortController(); const t=setTimeout(()=>c.abort(),ms);
+  try{ const r=await fetch(url,{signal:c.signal}); if(!r.ok) throw new Error(r.status); return await r.json(); }
+  finally{ clearTimeout(t); }
+}
+const OSRM='https://router.project-osrm.org';
+async function rutaOSRM(a,b){
+  const j=await pedirJSON(`${OSRM}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`);
+  if(j.code!=='Ok'||!j.routes.length) throw new Error('sin ruta');
+  const r=j.routes[0];
+  return {seg:r.duration, m:r.distance, puntos:r.geometry.coordinates.map(([x,y])=>[y,x])};
+}
+async function tablaOSRM(origen,destinos){
+  const coords=[origen,...destinos].map(p=>`${p.lng},${p.lat}`).join(';');
+  const j=await pedirJSON(`${OSRM}/table/v1/driving/${coords}?sources=0&annotations=duration,distance`);
+  if(j.code!=='Ok') throw new Error('sin tabla');
+  return destinos.map((_,i)=>({seg:j.durations[0][i+1], m:j.distances?j.distances[0][i+1]:null}));
+}
+
+/* ---- Voz y sonido ---- */
+function hablar(texto){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(texto); u.lang='es-MX'; u.rate=1;
+    const v=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('es'));
+    if(v) u.voice=v;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+function campana(){
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    [880,1175].forEach((f,i)=>{const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=f;o.connect(g);g.connect(ctx.destination);
+      const t=ctx.currentTime+i*0.22; g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.3,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.35); o.start(t); o.stop(t+0.4);});
+  }catch(e){}
+  if(navigator.vibrate) navigator.vibrate([300,120,300]);
+}
+
+/* ---- Pantalla siempre encendida durante la ruta ---- */
+let candado=null;
+async function mantenerPantalla(on){
+  try{
+    if(on && 'wakeLock' in navigator && !candado){ candado=await navigator.wakeLock.request('screen'); candado.addEventListener('release',()=>candado=null); }
+    if(!on && candado){ await candado.release(); candado=null; }
+  }catch(e){}
+}
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && NAV) mantenerPantalla(true); });
+
+/* ---- Fotos: reducir tamaño ---- */
+function comprimirFoto(file,max=900,calidad=0.72){
+  return new Promise((res,rej)=>{
+    const img=new Image(); const url=URL.createObjectURL(file);
+    img.onload=()=>{ const k=Math.min(1,max/Math.max(img.width,img.height));
+      const c=document.createElement('canvas'); c.width=Math.round(img.width*k); c.height=Math.round(img.height*k);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg',calidad)); };
+    img.onerror=()=>{URL.revokeObjectURL(url); rej(new Error('No se pudo leer la foto'));};
+    img.src=url;
+  });
+}
+
+/* ---- Leer coordenadas de un enlace o texto compartido ---- */
+function extraerCoords(texto){
+  if(!texto) return null;
+  const t=decodeURIComponent(String(texto).replace(/\+/g,' '));
+  const patrones=[
+    /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/,
+    /@(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)/,
+    /[?&](?:q|ll|query|destination|daddr|center|sll)=(?:loc:)?(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/i,
+    /geo:(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/i,
+    /(-?\d{1,2}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})/
+  ];
+  for(const p of patrones){
+    const m=t.match(p);
+    if(m){ const lat=parseFloat(m[1]), lng=parseFloat(m[2]);
+      if(Math.abs(lat)<=90 && Math.abs(lng)<=180) return {lat,lng}; }
+  }
+  return null;
+}
+const extraerEnlace = t => (String(t||'').match(/https?:\/\/\S+/)||[])[0]||'';
+
+/* ================= Base de datos (en el teléfono) ================= */
+const DB={
+  db:null,
+  abrir(){ return new Promise((res,rej)=>{
+    const r=indexedDB.open('grupoAlfaCobranza',1);
+    r.onupgradeneeded=()=>{const d=r.result;
+      if(!d.objectStoreNames.contains('clientes')) d.createObjectStore('clientes',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('rutas')) d.createObjectStore('rutas',{keyPath:'id'});};
+    r.onsuccess=()=>{DB.db=r.result;res();}; r.onerror=()=>rej(r.error);});},
+  todos(st){ return new Promise((res,rej)=>{const q=DB.db.transaction(st).objectStore(st).getAll(); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error);});},
+  poner(st,v){ return new Promise((res,rej)=>{const t=DB.db.transaction(st,'readwrite'); t.objectStore(st).put(v); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error);});},
+  borrar(st,id){ return new Promise((res,rej)=>{const t=DB.db.transaction(st,'readwrite'); t.objectStore(st).delete(id); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error);});}
+};
+let clientes=[], rutas=[];
+const cliente = id => clientes.find(c=>c.id===id);
+
+/* Estado de la ruta (se guarda para no perderlo si se cierra la app) */
+const RUTA_KEY='ga_ruta';
+let R=cargarRuta();
+function rutaVacia(){ return {estado:'armando',lista:[],pendientes:[],actual:null,cobros:[],cancelados:[],inicio:null,alerta10:false}; }
+function cargarRuta(){ try{ return Object.assign(rutaVacia(),JSON.parse(localStorage.getItem(RUTA_KEY))||{}); }catch(e){ return rutaVacia(); } }
+function guardarRuta(){ try{ localStorage.setItem(RUTA_KEY,JSON.stringify(R)); }catch(e){} }
+
+/* ================= Diálogos ================= */
+function dialogo({titulo='',texto='',html='',botones=[{txt:'Aceptar',clase:'',valor:true}],alAbrir}){
+  return new Promise(res=>{
+    const velo=document.createElement('div'); velo.className='velo';
+    velo.innerHTML=`<div class="dialogo">${titulo?`<h3>${titulo}</h3>`:''}${texto?`<p>${texto}</p>`:''}${html}<div class="botones"></div></div>`;
+    const caja=velo.querySelector('.botones');
+    botones.forEach(b=>{
+      const el=document.createElement('button'); el.className='btn ancho '+(b.clase||''); el.textContent=b.txt;
+      el.onclick=()=>{ const v=typeof b.valor==='function'?b.valor(velo):b.valor; if(v===undefined) return; velo.remove(); res(v); };
+      caja.appendChild(el);
+    });
+    document.body.appendChild(velo);
+    if(alAbrir) alAbrir(velo);
+  });
+}
+const confirmar=(titulo,texto,si='Sí',clase='')=>dialogo({titulo,texto,botones:[{txt:si,clase:clase||'',valor:true},{txt:'Cancelar',clase:'claro',valor:false}]});
+
+const MOTIVOS=['No estaba en casa','No tenía dinero','Pidió otra fecha','No encontré el domicilio','Ya había pagado','Se negó a pagar'];
+function pedirMotivo(nombre){
+  return dialogo({
+    titulo:'Cancelar cobro', texto:`¿Por qué se cancela el cobro de <b>${esc(nombre)}</b>?`,
+    html:`<div class="motivos">${MOTIVOS.map(m=>`<button type="button">${m}</button>`).join('')}</div>
+          <label class="campo"><span>Motivo u observaciones</span><textarea id="txtMotivo" rows="2" placeholder="Escribe el motivo…"></textarea></label>`,
+    alAbrir:v=>{ v.querySelectorAll('.motivos button').forEach(b=>b.onclick=()=>{
+        v.querySelectorAll('.motivos button').forEach(x=>x.classList.remove('sel')); b.classList.add('sel');
+        v.querySelector('#txtMotivo').value=b.textContent; }); },
+    botones:[
+      {txt:'Cancelar cobro',clase:'rojo',valor:v=>{ const m=v.querySelector('#txtMotivo').value.trim(); if(!m){ toast('Escribe o elige un motivo'); return undefined; } return m; }},
+      {txt:'Regresar',clase:'claro',valor:null}
+    ]});
+}
+
+/* ================= Pestañas ================= */
+let tabActual='clientes';
+function irTab(t){
+  tabActual=t;
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('activa',b.dataset.tab===t));
+  ['clientes','ruta','historial'].forEach(x=>$('#tab-'+x).classList.toggle('oculto',x!==t));
+  if(t==='clientes') pintarClientes();
+  if(t==='ruta') pintarArmado();
+  if(t==='historial') pintarHistorial();
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>irTab(b.dataset.tab));
+
+function totalHoy(){
+  const hoy=new Date();
+  let t=rutas.filter(r=>mismoDia(r.fin,hoy)).reduce((s,r)=>s+r.total,0);
+  if(R.estado==='activa') t+=R.cobros.filter(c=>mismoDia(c.hora,hoy)).reduce((s,c)=>s+c.monto,0);
+  return t;
+}
+function pintarTotal(){ const t=fmt(totalHoy()); $('#totalHoy').textContent=t; $('#totalHoy2').textContent=t; }
+
+/* ================= CLIENTES ================= */
+function miniatura(c){ return c.foto ? `<div class="mini" style="background-image:url('${c.foto}')"></div>` : `<div class="mini">🏠</div>`; }
+
+function pintarClientes(){
+  const q=norm($('#buscarCliente').value);
+  const lista=clientes.filter(c=>!q||norm(c.nombre).includes(q)).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
+  const cont=$('#listaClientes');
+  if(!clientes.length){ cont.innerHTML=`<div class="vacio"><div class="icono">👥</div>Aún no tienes clientes registrados.<br>Toca <b>+ Nuevo cliente</b> o comparte tu ubicación desde Google Maps.</div>`; return; }
+  if(!lista.length){ cont.innerHTML=`<div class="vacio">No hay clientes que coincidan con “${esc($('#buscarCliente').value)}”.</div>`; return; }
+  cont.innerHTML=lista.map(c=>`<button class="cliente" data-id="${c.id}">${miniatura(c)}
+    <div class="datos"><b>${esc(c.nombre)}</b><small>${c.lat!=null?'📍 Con ubicación':'<span class="chip rojo">Sin ubicación</span>'}${c.telefono?' · 📞 '+esc(c.telefono):''}</small></div>
+    ${R.lista.includes(c.id)?'<span class="chip oro accion">En ruta</span>':''}</button>`).join('');
+  cont.querySelectorAll('.cliente').forEach(b=>b.onclick=()=>verCliente(b.dataset.id));
+}
+$('#buscarCliente').addEventListener('input',pintarClientes);
+$('#btnNuevo').onclick=()=>formCliente();
+
+function abrirHoja(titulo,cuerpoHTML,acciones=''){
+  const h=document.createElement('div'); h.className='hoja';
+  h.innerHTML=`<div class="barra"><button data-cerrar>← Atrás</button><b>${titulo}</b>${acciones}</div><div class="cuerpo">${cuerpoHTML}</div>`;
+  document.body.appendChild(h);
+  h.querySelector('[data-cerrar]').onclick=()=>h.remove();
+  return h;
+}
+
+function mapaChico(el,pos,arrastrable,alMover){
+  if(!hayMapa()){ el.innerHTML='<div class="vacio">El mapa necesita internet la primera vez.</div>'; return null; }
+  const centro=pos||CENTRO_DEFECTO;
+  const m=L.map(el,{zoomControl:true,attributionControl:true}).setView([centro.lat,centro.lng],pos?17:11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(m);
+  let mk=null;
+  const poner=p=>{ if(!mk){ mk=L.marker([p.lat,p.lng],{draggable:arrastrable}).addTo(m); if(arrastrable) mk.on('dragend',()=>{const ll=mk.getLatLng(); alMover&&alMover({lat:ll.lat,lng:ll.lng});}); } else mk.setLatLng([p.lat,p.lng]); };
+  if(pos) poner(pos);
+  if(arrastrable) m.on('click',e=>{ poner({lat:e.latlng.lat,lng:e.latlng.lng}); alMover&&alMover({lat:e.latlng.lat,lng:e.latlng.lng}); });
+  setTimeout(()=>m.invalidateSize(),250);
+  return {mapa:m, poner:(p,zoom=true)=>{poner(p); if(zoom) m.setView([p.lat,p.lng],17);}};
+}
+
+/* Formulario: nuevo o editar. inicial puede traer {nombre, lat, lng, enlace, nota} */
+function formCliente(existente=null,inicial={}){
+  const c=existente?{...existente}:{id:uid(),nombre:'',telefono:'',referencia:'',lat:null,lng:null,foto:null,enlace:'',creado:new Date().toISOString(),...inicial};
+  const h=abrirHoja(existente?'Editar cliente':'Nuevo cliente',`
+    ${inicial._aviso?`<div class="aviso info">${inicial._aviso}</div>`:''}
+    <label class="campo"><span>Nombre completo del cliente</span><input id="fNombre" value="${esc(c.nombre)}" placeholder="Ej. María López Hernández" autocomplete="off"></label>
+    <label class="campo"><span>Teléfono <span class="opcional">(opcional, para avisarle que vas en camino)</span></span><input id="fTel" type="tel" inputmode="tel" value="${esc(c.telefono)}" placeholder="10 dígitos"></label>
+    <div class="campo"><span>Ubicación <span class="opcional">(toca el mapa o arrastra el pin para ajustarla)</span></span>
+      <div class="mapaForm" id="fMapa"></div>
+      <div class="fila" style="margin-top:8px">
+        <button class="btn claro" id="fGPS" type="button">📍 Usar mi ubicación actual</button>
+        <button class="btn claro" id="fEnlace" type="button">🔗 Pegar enlace</button>
+      </div>
+      <small id="fUbiTxt" style="display:block;margin-top:6px;color:var(--suave)"></small>
+    </div>
+    <label class="campo"><span>Referencias del domicilio <span class="opcional">(opcional)</span></span><textarea id="fRef" rows="2" placeholder="Ej. Casa azul con portón negro, frente a la tienda">${esc(c.referencia)}</textarea></label>
+    <div class="campo"><span>Foto de la fachada <span class="opcional">(opcional)</span></span>
+      <div id="fFotoCaja"></div>
+      <div class="fila" style="margin-top:8px">
+        <button class="btn claro" id="fFotoBtn" type="button">📷 Tomar / elegir foto</button>
+        <button class="btn rojo ${c.foto?'':'oculto'}" id="fFotoQuitar" type="button">Quitar</button>
+      </div>
+      <input type="file" id="fFoto" accept="image/*" capture="environment" class="oculto">
+    </div>
+    <button class="btn oro ancho" id="fGuardar" style="margin-top:6px">Guardar cliente</button>
+  `);
+  const ubiTxt=()=>{ h.querySelector('#fUbiTxt').textContent = c.lat!=null ? `Ubicación guardada: ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}` : 'Sin ubicación todavía.'; };
+  const pintarFoto=()=>{ h.querySelector('#fFotoCaja').innerHTML = c.foto?`<img class="foto" src="${c.foto}" alt="Fachada">`:`<div class="fotoVacia">Sin foto</div>`; h.querySelector('#fFotoQuitar').classList.toggle('oculto',!c.foto); };
+  ubiTxt(); pintarFoto();
+  const mc=mapaChico(h.querySelector('#fMapa'), c.lat!=null?{lat:c.lat,lng:c.lng}:null, true, p=>{c.lat=p.lat;c.lng=p.lng;ubiTxt();});
+
+  h.querySelector('#fGPS').onclick=async()=>{
+    const b=h.querySelector('#fGPS'); b.disabled=true; b.textContent='Buscando señal…';
+    try{ const p=await obtenerPosicion(); c.lat=p.lat; c.lng=p.lng; mc&&mc.poner(p); ubiTxt(); if(p.acc>60) toast(`Precisión aproximada: ${Math.round(p.acc)} m. Ajusta el pin si hace falta.`,3500); }
+    catch(e){ toast(e.message,4000); }
+    b.disabled=false; b.textContent='📍 Usar mi ubicación actual';
+  };
+  h.querySelector('#fEnlace').onclick=async()=>{
+    const v=await dialogo({titulo:'Pegar ubicación',texto:'Pega un enlace de Google Maps o coordenadas (ej. 19.2581, -98.8975).',
+      html:'<label class="campo"><input id="dEnl" placeholder="Pega aquí…"></label>',
+      botones:[{txt:'Usar',clase:'oro',valor:v=>v.querySelector('#dEnl').value},{txt:'Cancelar',clase:'claro',valor:null}]});
+    if(!v) return;
+    const p=extraerCoords(v);
+    if(p){ c.lat=p.lat; c.lng=p.lng; c.enlace=extraerEnlace(v)||c.enlace; mc&&mc.poner(p); ubiTxt(); }
+    else { c.enlace=extraerEnlace(v)||c.enlace; toast('Ese enlace no trae coordenadas. Usa “Mi ubicación actual” o toca el mapa.',4500); }
+  };
+  h.querySelector('#fFotoBtn').onclick=()=>h.querySelector('#fFoto').click();
+  h.querySelector('#fFoto').onchange=async e=>{ const f=e.target.files[0]; if(!f) return;
+    try{ c.foto=await comprimirFoto(f); pintarFoto(); }catch(err){ toast(err.message); } e.target.value=''; };
+  h.querySelector('#fFotoQuitar').onclick=()=>{ c.foto=null; pintarFoto(); };
+  h.querySelector('#fGuardar').onclick=async()=>{
+    c.nombre=h.querySelector('#fNombre').value.trim().replace(/\s+/g,' ');
+    c.telefono=h.querySelector('#fTel').value.trim();
+    c.referencia=h.querySelector('#fRef').value.trim();
+    if(!c.nombre){ toast('Escribe el nombre del cliente'); h.querySelector('#fNombre').focus(); return; }
+    const dup=clientes.find(x=>x.id!==c.id && norm(x.nombre)===norm(c.nombre));
+    if(dup && !(await confirmar('Nombre repetido',`Ya existe un cliente llamado <b>${esc(dup.nombre)}</b>. ¿Es una persona distinta y quieres guardarlo de todos modos?`,'Guardar de todos modos'))) return;
+    if(c.lat==null && !(await confirmar('Sin ubicación','Este cliente no tiene ubicación, así que no podrá ordenarse por cercanía en la ruta. ¿Guardar así?','Guardar sin ubicación'))) return;
+    delete c._aviso;
+    await DB.poner('clientes',c);
+    const i=clientes.findIndex(x=>x.id===c.id); if(i>=0) clientes[i]=c; else clientes.push(c);
+    h.remove(); document.querySelectorAll('.hoja').forEach(x=>x.remove());
+    toast(existente?'Cliente actualizado':'Cliente guardado');
+    pintarClientes(); if(tabActual==='ruta') pintarArmado();
+  };
+  if(!existente && !inicial.nombre) setTimeout(()=>h.querySelector('#fNombre').focus(),300);
+}
+
+function verCliente(id){
+  const c=cliente(id); if(!c) return;
+  const enRuta=R.lista.includes(c.id);
+  const h=abrirHoja(esc(c.nombre),`
+    ${c.foto?`<img class="foto" src="${c.foto}" alt="Fachada" style="margin-bottom:12px">`:''}
+    <div class="tarjeta" style="margin-bottom:12px">
+      <div class="renglon"><div class="izq"><small>Nombre</small>${esc(c.nombre)}</div></div>
+      ${c.telefono?`<div class="renglon"><div class="izq"><small>Teléfono</small><a href="tel:${esc(c.telefono)}">${esc(c.telefono)}</a></div></div>`:''}
+      ${c.referencia?`<div class="renglon"><div class="izq"><small>Referencias</small>${esc(c.referencia)}</div></div>`:''}
+      <div class="renglon"><div class="izq"><small>Ubicación</small>${c.lat!=null?`${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`:'Sin ubicación'}</div></div>
+    </div>
+    ${c.lat!=null?'<div class="mapaForm" id="vMapa" style="margin-bottom:12px"></div>':''}
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn oro" id="vRuta" ${R.estado==='activa'?'disabled':''}>${enRuta?'✓ Ya está en la lista de cobranza':'+ Agregar a la lista de cobranza'}</button>
+      ${c.lat!=null?`<a class="btn claro" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}">Abrir en Google Maps</a>`:''}
+      <div class="fila"><button class="btn claro" id="vEditar">Editar</button><button class="btn rojo" id="vBorrar">Eliminar</button></div>
+    </div>`);
+  if(c.lat!=null) mapaChico(h.querySelector('#vMapa'),{lat:c.lat,lng:c.lng},false);
+  h.querySelector('#vRuta').onclick=()=>{ if(!enRuta){ agregarARuta(c.id); } h.remove(); irTab('ruta'); };
+  h.querySelector('#vEditar').onclick=()=>{ h.remove(); formCliente(c); };
+  h.querySelector('#vBorrar').onclick=async()=>{
+    if(!(await confirmar('Eliminar cliente',`¿Seguro que quieres eliminar a <b>${esc(c.nombre)}</b>? Esto no se puede deshacer.`,'Eliminar','rojo'))) return;
+    await DB.borrar('clientes',c.id);
+    clientes=clientes.filter(x=>x.id!==c.id);
+    R.lista=R.lista.filter(x=>x!==c.id); R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta();
+    h.remove(); toast('Cliente eliminado'); pintarClientes();
+  };
+}
+
+/* ================= ARMAR RUTA ================= */
+function agregarARuta(id){
+  if(R.estado==='activa'){ toast('Termina la ruta en curso para armar una nueva'); return; }
+  if(!R.lista.includes(id)){ R.lista.push(id); guardarRuta(); toast((cliente(id)||{}).nombre+' agregado a la ruta'); }
+}
+function pintarArmado(){
+  const activa=R.estado==='activa';
+  $('#rutaActiva').classList.toggle('oculto',!activa);
+  $('#armado').classList.toggle('oculto',activa);
+  if(activa){
+    const cobrado=R.cobros.reduce((s,c)=>s+c.monto,0);
+    $('#rutaActiva').innerHTML=`<div class="tarjeta"><b>Tienes una ruta en curso</b>
+      <p style="color:var(--suave);margin:6px 0 12px">${R.pendientes.length} por visitar · ${R.cobros.length} cobrados · ${fmt(cobrado)}</p>
+      <button class="btn oro ancho" id="btnContinuar">Continuar ruta</button></div>`;
+    $('#btnContinuar').onclick=reanudarRuta;
+    return;
+  }
+  R.lista=R.lista.filter(id=>cliente(id));
+  const cont=$('#listaRuta');
+  if(!R.lista.length){
+    cont.innerHTML=`<div class="vacio"><div class="icono">🧾</div>${clientes.length?'Escribe arriba el nombre de cada cliente que vas a cobrar hoy.':'Primero registra clientes en la pestaña <b>Clientes</b>.'}</div>`;
+  }else{
+    cont.innerHTML=R.lista.map((id,i)=>{const c=cliente(id); return `<div class="cliente">${miniatura(c)}
+      <div class="datos"><b>${i+1}. ${esc(c.nombre)}</b><small>${c.lat!=null?'📍 Con ubicación':'<span class="chip rojo">Sin ubicación</span>'}</small></div>
+      <button class="btn rojo accion" data-quitar="${id}" style="min-height:40px;padding:8px 12px">Quitar</button></div>`;}).join('');
+    cont.querySelectorAll('[data-quitar]').forEach(b=>b.onclick=()=>{ R.lista=R.lista.filter(x=>x!==b.dataset.quitar); guardarRuta(); pintarArmado(); });
+  }
+  $('#btnIniciar').textContent=`Iniciar ruta${R.lista.length?' ('+R.lista.length+')':''}`;
+  $('#btnIniciar').disabled=!R.lista.length;
+  $('#btnVaciar').disabled=!R.lista.length;
+}
+function pintarSugerencias(){
+  const q=norm($('#agregarRuta').value), box=$('#sugerencias');
+  if(!q){ box.classList.add('oculto'); return; }
+  const m=clientes.filter(c=>norm(c.nombre).includes(q)).sort((a,b)=>norm(a.nombre).indexOf(q)-norm(b.nombre).indexOf(q)).slice(0,8);
+  box.innerHTML = m.length ? m.map(c=>{const ya=R.lista.includes(c.id); return `<button data-id="${c.id}" ${ya?'disabled':''}>${ya?'✓':'+'} ${esc(c.nombre)} ${c.lat==null?'<span class="chip rojo">sin ubicación</span>':''}${ya?' <small>(ya está)</small>':''}</button>`;}).join('')
+    : `<button disabled>No hay ningún cliente con ese nombre</button>`;
+  box.classList.remove('oculto');
+  box.querySelectorAll('button[data-id]').forEach(b=>b.onclick=()=>{ agregarARuta(b.dataset.id); $('#agregarRuta').value=''; box.classList.add('oculto'); pintarArmado(); $('#agregarRuta').focus(); });
+}
+$('#agregarRuta').addEventListener('input',pintarSugerencias);
+$('#agregarRuta').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const b=$('#sugerencias button[data-id]:not([disabled])'); if(b) b.click(); } });
+document.addEventListener('click',e=>{ if(!e.target.closest('.buscador')) $('#sugerencias').classList.add('oculto'); });
+$('#btnVaciar').onclick=async()=>{ if(await confirmar('Vaciar lista','¿Quitar a todos los clientes de la lista de cobranza?','Vaciar','rojo')){ R.lista=[]; guardarRuta(); pintarArmado(); } };
+$('#btnIniciar').onclick=()=>{
+  if(!R.lista.length) return;
+  Object.assign(R,{estado:'activa',pendientes:[...R.lista],actual:null,cobros:[],cancelados:[],inicio:new Date().toISOString(),alerta10:false});
+  guardarRuta(); hablar('Iniciamos la ruta de cobranza'); mostrarEleccion();
+};
+
+/* ================= RUTA EN CURSO ================= */
+const pantallaRuta=$('#ruta');
+function abrirPantallaRuta(html){ pantallaRuta.innerHTML=html; pantallaRuta.classList.remove('oculto'); document.body.style.overflow='hidden'; }
+function cerrarPantallaRuta(){ pantallaRuta.classList.add('oculto'); pantallaRuta.innerHTML=''; document.body.style.overflow=''; }
+
+function reanudarRuta(){ if(R.actual && cliente(R.actual)) iniciarNavegacion(R.actual,true); else mostrarEleccion(); }
+
+async function mostrarEleccion(){
+  detenerNavegacion();
+  R.actual=null; R.alerta10=false;
+  R.pendientes=R.pendientes.filter(id=>cliente(id)); guardarRuta();
+  if(!R.pendientes.length){ hablar('Ya no quedan clientes en la lista. Ruta concluida.'); return finalizarRuta(); }
+  abrirPantallaRuta(`<div class="cargando"><div class="giro"></div>Buscando los clientes más cercanos…</div>`);
+  mantenerPantalla(true);
+  let pos=null, errorGPS='';
+  try{ pos=await obtenerPosicion(12000); }catch(e){ errorGPS=e.message; }
+  const pend=R.pendientes.map(cliente);
+  const conUb=pend.filter(c=>c.lat!=null), sinUb=pend.filter(c=>c.lat==null);
+  let info={};
+  if(pos){
+    conUb.forEach(c=>info[c.id]={m:distancia(pos,c)});
+    conUb.sort((a,b)=>info[a.id].m-info[b.id].m);
+    // tiempos reales de manejo para los más cercanos (si hay internet)
+    const cand=conUb.slice(0,6);
+    try{ const t=await tablaOSRM(pos,cand); cand.forEach((c,i)=>{ if(t[i].seg!=null) info[c.id]={m:t[i].m??info[c.id].m,seg:t[i].seg}; });
+      cand.sort((a,b)=>info[a.id].seg-info[b.id].seg); conUb.splice(0,cand.length,...cand);
+    }catch(e){ conUb.forEach(c=>info[c.id].seg=estimarSegundos(info[c.id].m)); }
+  }
+  const top=pos?conUb.slice(0,3):[];
+  const cobrado=R.cobros.reduce((s,c)=>s+c.monto,0);
+  const tarjeta=(c,primera)=>`<button class="opcion ${primera?'primera':''}" data-ir="${c.id}">${miniatura(c)}
+      <div class="datos">${primera?'<span class="chip oro">El más cercano</span>':''}<b>${esc(c.nombre)}</b>
+      <small>${info[c.id]?`${textoDist(info[c.id].m)} · aprox. ${textoMin(info[c.id].seg)}`:(c.lat==null?'Sin ubicación registrada':'')}</small></div>
+      <span class="ir">Ir</span></button>`;
+  const resto=[...conUb.filter(c=>!top.includes(c)),...sinUb];
+  abrirPantallaRuta(`<div class="eleccion">
+    <div class="fila" style="margin-bottom:6px"><span class="pildora">Por visitar: <b>${R.pendientes.length}</b></span><span class="pildora">Cobrado: <b>${fmt(cobrado)}</b></span></div>
+    <h2 style="margin-top:14px">${R.cobros.length||R.cancelados.length?'¿Con quién sigues?':'¿Con quién quieres empezar?'}</h2>
+    ${errorGPS?`<div class="aviso">${esc(errorGPS)} Elige el cliente manualmente.</div>`:''}
+    ${top.map((c,i)=>tarjeta(c,i===0)).join('')}
+    ${resto.length?`<button class="btn borde ancho" id="btnOtro" style="margin:6px 0 10px">${top.length?'Elegir otro cliente':'Ver clientes de la lista'} (${resto.length})</button>
+      <div id="listaOtros" class="${top.length?'oculto':''}">${resto.map(c=>tarjeta(c,false)).join('')}</div>`:''}
+    <button class="btn rojo ancho" id="btnTerminar" style="margin-top:14px">Terminar ruta</button>
+    <button class="btn claro ancho" id="btnMinimizar" style="margin-top:8px">Ocultar (la ruta sigue activa)</button>
+  </div>`);
+  pantallaRuta.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>iniciarNavegacion(b.dataset.ir));
+  const bo=$('#btnOtro'); if(bo) bo.onclick=()=>{ $('#listaOtros').classList.toggle('oculto'); };
+  $('#btnTerminar').onclick=terminarRutaManual;
+  $('#btnMinimizar').onclick=()=>{ cerrarPantallaRuta(); mantenerPantalla(false); irTab('ruta'); };
+}
+
+async function terminarRutaManual(){
+  const quedan=R.pendientes.length;
+  if(await confirmar('Terminar ruta',quedan?`Aún quedan <b>${quedan}</b> cliente(s) sin visitar. ¿Terminar la ruta de todos modos?`:'¿Terminar la ruta?','Terminar ruta','rojo')) finalizarRuta();
+}
+
+/* ---- Navegación hacia el cliente ---- */
+let NAV=null;
+function iconoYo(){ return L.divIcon({className:'',html:'<div class="marcadorYo"></div>',iconSize:[20,20],iconAnchor:[10,10]}); }
+function iconoDest(){ return L.divIcon({className:'',html:'<div class="marcadorDest"><span>$</span></div>',iconSize:[34,34],iconAnchor:[17,34]}); }
+
+function iniciarNavegacion(id,reanudando=false){
+  const c=cliente(id); if(!c) return mostrarEleccion();
+  if(!reanudando) R.alerta10=false;
+  R.actual=id; guardarRuta();
+  detenerNavegacion();
+  mantenerPantalla(true);
+  const sinUb=c.lat==null;
+  abrirPantallaRuta(`
+    <div id="mapaNav"></div>
+    <div class="topNav">
+      <button class="redondo" id="nVolver" title="Cambiar de cliente">☰</button>
+      <span class="pildora" style="flex:1">Cobrado: <b>${fmt(R.cobros.reduce((s,x)=>s+x.monto,0))}</b> · Faltan ${R.pendientes.length}</span>
+      <button class="redondo" id="nCentrar" title="Centrar">◎</button>
+    </div>
+    <div id="banner" class="oculto"><div class="t" id="bannerTxt"></div><button class="btn claro" id="bannerX" style="min-height:36px;padding:6px 10px">OK</button></div>
+    <div class="panelNav">
+      <div class="destino">${miniatura(c)}<div class="datos"><b>${esc(c.nombre)}</b>
+        <div class="eta">${sinUb?'<span>Este cliente no tiene ubicación registrada</span>':'<span><strong id="nMin">…</strong> </span><span id="nDist"></span>'}</div>
+        ${c.referencia?`<small style="color:var(--suave)">${esc(c.referencia)}</small>`:''}</div></div>
+      <div class="fila" style="margin-bottom:8px">
+        ${c.telefono?`<a class="btn claro" href="tel:${esc(c.telefono)}">📞 Llamar</a>`:''}
+        ${!sinUb?`<a class="btn claro" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}&travelmode=driving">Google Maps</a>`:''}
+      </div>
+      <div class="fila">
+        <button class="btn rojo" id="nCancelar">Cancelar cobro</button>
+        <button class="btn verde" id="nLlegue">Ya llegué</button>
+      </div>
+      <button class="btn claro ancho" id="nTerminar" style="margin-top:8px;min-height:40px">Terminar ruta</button>
+    </div>`);
+  $('#nVolver').onclick=async()=>{ if(await confirmar('Cambiar de cliente','¿Dejar este destino y elegir otro cliente de la lista? (seguirá pendiente)','Elegir otro')) mostrarEleccion(); };
+  $('#nCancelar').onclick=async()=>{ const m=await pedirMotivo(c.nombre); if(m) cancelarCobro(c,m); };
+  $('#nLlegue').onclick=()=>llegada(c,true);
+  $('#nTerminar').onclick=terminarRutaManual;
+  $('#bannerX').onclick=()=>$('#banner').classList.add('oculto');
+
+  NAV={c,seguir:true,llegado:false,ultimoCalc:0,posCalc:null,eta:null,watch:null,map:null,yo:null,linea:null,consultando:false};
+  if(hayMapa()){
+    const m=L.map('mapaNav',{zoomControl:false}).setView(sinUb?[CENTRO_DEFECTO.lat,CENTRO_DEFECTO.lng]:[c.lat,c.lng],15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(m);
+    if(!sinUb) L.marker([c.lat,c.lng],{icon:iconoDest()}).addTo(m);
+    m.on('dragstart',()=>NAV&&(NAV.seguir=false));
+    NAV.map=m; setTimeout(()=>m.invalidateSize(),200);
+  }else{
+    $('#mapaNav').innerHTML='<div class="vacio">Sin conexión para cargar el mapa. Puedes usar el botón de Google Maps.</div>';
+  }
+  $('#nCentrar').onclick=()=>{ if(!NAV) return; NAV.seguir=true; if(NAV.ultimaPos&&NAV.map) NAV.map.setView([NAV.ultimaPos.lat,NAV.ultimaPos.lng],16); };
+  if(sinUb) return;
+  if(navigator.geolocation){
+    NAV.watch=navigator.geolocation.watchPosition(p=>alMoverse({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),
+      e=>{ if(e.code===1) toast('Activa el permiso de ubicación para seguir la ruta',4000); },
+      {enableHighAccuracy:true,maximumAge:5000,timeout:20000});
+  }
+}
+
+function avisar(texto,voz){
+  if(!$('#banner')) return;
+  $('#bannerTxt').textContent=texto; $('#banner').classList.remove('oculto');
+  campana(); setTimeout(()=>hablar(voz||texto),500);
+}
+
+async function alMoverse(p){
+  if(!NAV||NAV.llegado) return;
+  const c=NAV.c; NAV.ultimaPos=p;
+  if(NAV.map){
+    if(!NAV.yo) NAV.yo=L.marker([p.lat,p.lng],{icon:iconoYo(),zIndexOffset:1000}).addTo(NAV.map); else NAV.yo.setLatLng([p.lat,p.lng]);
+    if(NAV.seguir){
+      if(!NAV.encuadrado && NAV.linea){ /* se encuadra al trazar la ruta */ }
+      else if(NAV.encuadrado) NAV.map.panTo([p.lat,p.lng]);
+    }
+  }
+  const d=distancia(p,c);
+  // Llegada
+  if(d<=70 && !(NAV.pausaLlegada>Date.now())){ return llegada(c,false); }
+  // Recalcular tiempo cada 40 s o si se movió más de 250 m
+  const ahora=Date.now();
+  if(!NAV.consultando && (ahora-NAV.ultimoCalc>40000 || !NAV.posCalc || distancia(NAV.posCalc,p)>250)){
+    NAV.consultando=true; NAV.ultimoCalc=ahora; NAV.posCalc=p;
+    try{
+      const r=await rutaOSRM(p,c);
+      if(!NAV) return;
+      NAV.eta=r.seg; NAV.metros=r.m; NAV.etaBase=r.seg; NAV.dBase=d; NAV.mBase=r.m;
+      if(NAV.map){
+        if(NAV.linea) NAV.linea.setLatLngs(r.puntos); else NAV.linea=L.polyline(r.puntos,{color:'#163B63',weight:6,opacity:.85}).addTo(NAV.map);
+        if(!NAV.encuadrado){ NAV.map.fitBounds(NAV.linea.getBounds(),{padding:[40,40]}); NAV.encuadrado=true; }
+      }
+    }catch(e){
+      if(!NAV) return;
+      NAV.eta=estimarSegundos(d); NAV.metros=d*1.35; NAV.etaBase=NAV.eta; NAV.dBase=d; NAV.mBase=NAV.metros;
+      if(NAV.map && !NAV.encuadrado){ NAV.map.fitBounds([[p.lat,p.lng],[c.lat,c.lng]],{padding:[50,50]}); NAV.encuadrado=true; }
+    }
+    if(NAV) NAV.consultando=false;
+  }else if(NAV.etaBase!=null && NAV.dBase>0){
+    // ajustar el tiempo proporcionalmente a lo que se avanzó mientras no se recalcula
+    const k=Math.min(1.5,d/NAV.dBase);
+    NAV.eta=NAV.etaBase*k; NAV.metros=NAV.mBase*k;
+  }
+  if(!NAV) return;
+  if(NAV.eta!=null){
+    const mi=$('#nMin'), di=$('#nDist');
+    if(mi) mi.textContent=textoMin(NAV.eta); if(di) di.textContent=textoDist(NAV.metros||d);
+    if(!R.alerta10 && NAV.eta<=600){
+      R.alerta10=true; guardarRuta();
+      const min=Math.max(1,Math.round(NAV.eta/60));
+      const txt = min>=9 ? 'Ve marcando al cliente, estamos a 10 minutos del destino.' : `Ve marcando al cliente, estamos a ${min} minuto${min===1?'':'s'} del destino.`;
+      avisar('📞 '+txt+(c.telefono?'':''),txt);
+    }
+  }
+}
+
+function detenerNavegacion(){
+  if(!NAV) return;
+  if(NAV.watch!=null && navigator.geolocation) navigator.geolocation.clearWatch(NAV.watch);
+  if(NAV.map) NAV.map.remove();
+  NAV=null;
+}
+
+async function llegada(c,manual){
+  if(!NAV||NAV.llegado) return;
+  NAV.llegado=true;
+  if(!manual){ campana(); hablar(`Llegamos al destino. ¿Te pagó ${c.nombre}?`); }
+  const r=await dialogo({
+    titulo:'📍 Llegamos al destino', texto:`¿Te pagó <b>${esc(c.nombre)}</b>?`,
+    html:`<label class="campo"><span>Cantidad cobrada</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off"></label>`,
+    alAbrir:v=>setTimeout(()=>v.querySelector('#dMonto').focus(),250),
+    botones:[
+      {txt:'Sí, registrar cobro',clase:'verde',valor:v=>{ const n=parseFloat(String(v.querySelector('#dMonto').value).replace(/[^0-9.]/g,''));
+          if(!(n>0)){ toast('Escribe la cantidad que te pagó'); return undefined; } return {pago:n}; }},
+      {txt:'No pagó (cancelar cobro)',clase:'rojo',valor:{noPago:true}},
+      {txt:'Aún no llego, seguir navegando',clase:'claro',valor:{seguir:true}}
+    ]});
+  if(r.pago){ registrarCobro(c,r.pago); return; }
+  if(r.noPago){ const m=await pedirMotivo(c.nombre); if(m){ cancelarCobro(c,m); return; } }
+  if(NAV){ NAV.llegado=false; NAV.pausaLlegada=Date.now()+90000; }
+}
+
+function registrarCobro(c,monto){
+  R.cobros.push({id:c.id,nombre:c.nombre,monto:Math.round(monto*100)/100,hora:new Date().toISOString()});
+  R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta(); pintarTotal();
+  toast(`Cobro de ${fmt(monto)} registrado`);
+  hablar(`Cobro de ${Math.round(monto)} pesos registrado.`);
+  mostrarEleccion();
+}
+function cancelarCobro(c,motivo){
+  R.cancelados.push({id:c.id,nombre:c.nombre,motivo,hora:new Date().toISOString()});
+  R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta();
+  toast('Cobro cancelado');
+  mostrarEleccion();
+}
+
+async function finalizarRuta(){
+  detenerNavegacion(); mantenerPantalla(false);
+  const reg={id:uid(),inicio:R.inicio||new Date().toISOString(),fin:new Date().toISOString(),
+    cobros:R.cobros,cancelados:R.cancelados,
+    pendientes:R.pendientes.map(id=>(cliente(id)||{}).nombre).filter(Boolean),
+    total:R.cobros.reduce((s,c)=>s+c.monto,0)};
+  await DB.poner('rutas',reg); rutas.push(reg);
+  R=rutaVacia(); guardarRuta(); pintarTotal();
+  hablar(`Ruta terminada. Total cobrado: ${Math.round(reg.total)} pesos.`);
+  cerrarPantallaRuta();
+  mostrarResumen(reg,true);
+  if(tabActual==='ruta') pintarArmado();
+}
+
+/* ================= RESUMEN E HISTORIAL ================= */
+function textoResumen(r){
+  let t=`GRUPO ALFA COBRANZA\nResumen de ruta – ${fechaLarga(r.fin)}\n${hora(r.inicio)} a ${hora(r.fin)}\n\nTOTAL COBRADO: ${fmt(r.total)}\n`;
+  if(r.cobros.length) t+='\nCobrados:\n'+r.cobros.map((c,i)=>`${i+1}. ${c.nombre} – ${fmt(c.monto)} (${hora(c.hora)})`).join('\n')+'\n';
+  if(r.cancelados.length) t+='\nCancelados:\n'+r.cancelados.map(c=>`• ${c.nombre} – ${c.motivo}`).join('\n')+'\n';
+  if(r.pendientes.length) t+='\nNo visitados:\n'+r.pendientes.map(n=>`• ${n}`).join('\n')+'\n';
+  return t;
+}
+function mostrarResumen(r,recien=false){
+  const h=abrirHoja(recien?'Ruta terminada':'Resumen de ruta',`
+    <div class="total"><small>Total cobrado</small><b>${fmt(r.total)}</b>
+      <div style="font-size:13px;opacity:.85;margin-top:4px">${fechaLarga(r.fin)} · ${hora(r.inicio)} a ${hora(r.fin)}</div></div>
+    <h3>Cobrados (${r.cobros.length})</h3>
+    <div class="tarjeta">${r.cobros.length?r.cobros.map(c=>`<div class="renglon"><div class="izq">${esc(c.nombre)}<small>${hora(c.hora)}</small></div><div class="der">${fmt(c.monto)}</div></div>`).join(''):'<div class="vacio" style="padding:12px">Sin cobros</div>'}</div>
+    ${r.cancelados.length?`<h3>Cancelados (${r.cancelados.length})</h3><div class="tarjeta">${r.cancelados.map(c=>`<div class="renglon"><div class="izq">${esc(c.nombre)}<small>${esc(c.motivo)} · ${hora(c.hora)}</small></div><div class="der"><span class="chip rojo">Cancelado</span></div></div>`).join('')}</div>`:''}
+    ${r.pendientes.length?`<h3>No visitados (${r.pendientes.length})</h3><div class="tarjeta">${r.pendientes.map(n=>`<div class="renglon"><div class="izq">${esc(n)}</div></div>`).join('')}</div>`:''}
+    <button class="btn oro ancho" id="rCompartir" style="margin-top:16px">Compartir resumen (WhatsApp, etc.)</button>
+    <button class="btn claro ancho" id="rListo" style="margin-top:8px">Listo</button>`);
+  h.querySelector('#rListo').onclick=()=>{ h.remove(); if(recien) irTab('historial'); };
+  h.querySelector('#rCompartir').onclick=async()=>{
+    const t=textoResumen(r);
+    try{ if(navigator.share){ await navigator.share({title:'Resumen de cobranza',text:t}); return; } }catch(e){ if(e.name==='AbortError') return; }
+    try{ await navigator.clipboard.writeText(t); toast('Resumen copiado. Pégalo donde quieras.'); }catch(e){ toast('No se pudo compartir'); }
+  };
+}
+function pintarHistorial(){
+  pintarTotal();
+  const cont=$('#listaHist');
+  const ord=[...rutas].sort((a,b)=>b.fin.localeCompare(a.fin));
+  if(!ord.length){ cont.innerHTML='<div class="vacio"><div class="icono">📋</div>Aquí aparecerán tus rutas terminadas.</div>'; return; }
+  cont.innerHTML=ord.map(r=>`<button class="ruta-hist" data-id="${r.id}"><div><b style="text-transform:capitalize">${fechaLarga(r.fin)}</b>
+     <small>${hora(r.inicio)}–${hora(r.fin)} · ${r.cobros.length} cobrados${r.cancelados.length?' · '+r.cancelados.length+' cancelados':''}</small></div><b class="monto2">${fmt(r.total)}</b></button>`).join('');
+  cont.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>mostrarResumen(rutas.find(r=>r.id===b.dataset.id)));
+}
+
+/* ---- Respaldo ---- */
+$('#btnExportar').onclick=async()=>{
+  const datos={app:'grupo-alfa-cobranza',version:1,fecha:new Date().toISOString(),clientes,rutas};
+  const nombre=`respaldo-alfa-cobranza-${new Date().toISOString().slice(0,10)}.json`;
+  const blob=new Blob([JSON.stringify(datos)],{type:'application/json'});
+  try{ const f=new File([blob],nombre,{type:'application/json'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){ await navigator.share({files:[f],title:'Respaldo Alfa Cobranza'}); return; } }catch(e){ if(e.name==='AbortError') return; }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=nombre; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+};
+$('#btnImportar').onclick=()=>$('#archivoImportar').click();
+$('#archivoImportar').onchange=async e=>{
+  const f=e.target.files[0]; e.target.value=''; if(!f) return;
+  try{
+    const d=JSON.parse(await f.text());
+    if(d.app!=='grupo-alfa-cobranza') throw new Error('Ese archivo no es un respaldo de esta app');
+    if(!(await confirmar('Cargar respaldo',`Se agregarán ${d.clientes.length} cliente(s) y ${d.rutas.length} ruta(s). Los que ya existan se actualizarán.`,'Cargar'))) return;
+    for(const c of d.clientes){ await DB.poner('clientes',c); }
+    for(const r of d.rutas){ await DB.poner('rutas',r); }
+    clientes=await DB.todos('clientes'); rutas=await DB.todos('rutas');
+    toast('Respaldo cargado'); pintarHistorial(); pintarTotal();
+  }catch(err){ toast('No se pudo cargar: '+err.message,4000); }
+};
+
+/* ================= Ubicación compartida desde otra app ================= */
+async function revisarCompartido(){
+  const p=new URLSearchParams(location.search);
+  const texto=[p.get('title'),p.get('text'),p.get('url')].filter(Boolean).join(' ');
+  if(!texto) return;
+  history.replaceState(null,'',location.pathname);
+  let coords=extraerCoords(texto), aviso='';
+  const enlace=extraerEnlace(texto);
+  if(coords){ aviso='📍 Ubicación recibida. Escribe el nombre del cliente.'; }
+  else{
+    try{ const pos=await obtenerPosicion(); coords={lat:pos.lat,lng:pos.lng};
+      aviso=`📍 Se usó tu ubicación GPS actual (precisión ~${Math.round(pos.acc)} m). Si no estás en la casa del cliente, mueve el pin.`;
+    }catch(e){ aviso='No se pudo leer la ubicación compartida. Toca el mapa o usa “Mi ubicación actual”.'; }
+  }
+  irTab('clientes');
+  formCliente(null,{lat:coords?coords.lat:null,lng:coords?coords.lng:null,enlace,_aviso:aviso});
+}
+
+/* ================= Instalación ================= */
+let eventoInstalar=null;
+window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); eventoInstalar=e; $('#btnInstalar').classList.remove('oculto'); });
+$('#btnInstalar').onclick=async()=>{ if(!eventoInstalar) return; eventoInstalar.prompt(); await eventoInstalar.userChoice; eventoInstalar=null; $('#btnInstalar').classList.add('oculto'); };
+window.addEventListener('appinstalled',()=>$('#btnInstalar').classList.add('oculto'));
+
+/* Tip de compartir */
+try{ if(!localStorage.getItem('ga_tip')) $('#tipCompartir').classList.remove('oculto'); }catch(e){}
+$('#cerrarTip').onclick=e=>{ e.preventDefault(); $('#tipCompartir').classList.add('oculto'); try{localStorage.setItem('ga_tip','1');}catch(x){} };
+
+/* ================= Inicio ================= */
+(async function iniciar(){
+  try{ await DB.abrir(); clientes=await DB.todos('clientes'); rutas=await DB.todos('rutas'); }
+  catch(e){ toast('No se pudo abrir la base de datos del teléfono',5000); }
+  if(navigator.storage&&navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+  if('speechSynthesis' in window) speechSynthesis.getVoices();
+  pintarTotal(); pintarClientes();
+  if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
+  await revisarCompartido();
+  if(R.estado==='activa' && !document.querySelector('.hoja')){ irTab('ruta'); reanudarRuta(); }
+})();
+</script>
+</body>
+</html>
