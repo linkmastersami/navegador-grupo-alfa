@@ -241,7 +241,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v8';
+const APP_VERSION='v9';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -921,34 +921,52 @@ function revisarRepetidos(){
       <div class="mapaForm" id="rpMapa" style="margin:4px 0 12px"></div>
       <div class="campo" style="margin-bottom:10px"><span>¿Qué nombre se queda?</span>
         <div class="motivos" id="rpNombre" style="margin:0"><button type="button" data-v="a">${esc(A.nombre)}</button><button type="button" data-v="b">${esc(B.nombre)}</button></div></div>
-      <div class="campo" style="margin-bottom:12px"><span>¿Qué ubicación se queda? <span class="opcional">(también puedes tocar el pin)</span></span>
-        <div class="motivos" id="rpUbic" style="margin:0"><button type="button" data-v="a">🟡 Pin amarillo</button><button type="button" data-v="b">🔵 Pin azul</button></div></div>
+      <div class="campo" style="margin-bottom:12px"><span>¿Qué ubicación se queda? <span class="opcional">(toca un pin, o toca el mapa para poner otra)</span></span>
+        <div class="motivos" id="rpUbic" style="margin:0"><button type="button" data-v="a">🟡 Pin amarillo</button><button type="button" data-v="b">🔵 Pin azul</button><button type="button" data-v="c">🟢 Otra</button></div>
+        <small id="rpUbicTxt" class="oculto" style="display:block;margin-top:6px;color:var(--suave)">Toca el mapa donde está la casa o arrastra el pin verde.</small></div>
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="btn oro" id="rpUnir">Unir</button>
         <div class="fila"><button class="btn rojo" id="rpDistintos">Son personas distintas</button><button class="btn borde" id="rpSaltar">Saltar</button></div>
       </div>`;
     // Por omisión se sugiere el que tiene más visitas
     const sug=(B.visitas||0)>(A.visitas||0)?'b':'a';
-    let selNombre=sug, selUbic=sug;
+    let selNombre=sug, selUbic=sug, otra=null, pinOtra=null, mapaRp=null;
+    const ponerOtra=p=>{
+      otra=p; selUbic='c';
+      if(mapaRp){
+        if(!pinOtra){
+          pinOtra=L.marker([p.lat,p.lng],{draggable:true,zIndexOffset:1000,icon:L.divIcon({className:'',html:'<div class="marcadorDest" style="background:#1E9E5A"><span style="color:#fff">●</span></div>',iconSize:[34,34],iconAnchor:[17,34]})}).addTo(mapaRp);
+          pinOtra.on('dragend',()=>{ const ll=pinOtra.getLatLng(); otra={lat:ll.lat,lng:ll.lng}; selUbic='c'; marcar(); });
+        } else pinOtra.setLatLng([p.lat,p.lng]);
+      }
+      marcar();
+    };
     const marcar=()=>{
       cuerpo.querySelectorAll('#rpNombre button').forEach(x=>x.classList.toggle('sel',x.dataset.v===selNombre));
       cuerpo.querySelectorAll('#rpUbic button').forEach(x=>x.classList.toggle('sel',x.dataset.v===selUbic));
       const n=selNombre==='a'?A:B;
-      cuerpo.querySelector('#rpUnir').textContent=`Unir como «${n.nombre}» con el pin ${selUbic==='a'?'amarillo':'azul'}`;
+      cuerpo.querySelector('#rpUbicTxt').classList.toggle('oculto',selUbic!=='c');
+      cuerpo.querySelector('#rpUnir').disabled=(selUbic==='c'&&!otra);
+      cuerpo.querySelector('#rpUnir').textContent=`Unir como «${n.nombre}» con ${selUbic==='c'?(otra?'la ubicación nueva':'… (toca el mapa)'):'el pin '+(selUbic==='a'?'amarillo':'azul')}`;
     };
     cuerpo.querySelectorAll('#rpNombre button').forEach(x=>x.onclick=()=>{ selNombre=x.dataset.v; marcar(); });
-    cuerpo.querySelectorAll('#rpUbic button').forEach(x=>x.onclick=()=>{ selUbic=x.dataset.v; marcar(); });
+    cuerpo.querySelectorAll('#rpUbic button').forEach(x=>x.onclick=()=>{
+      selUbic=x.dataset.v;
+      if(selUbic==='c' && !otra){ ponerOtra({lat:(A.lat+B.lat)/2,lng:(A.lng+B.lng)/2}); return; }
+      marcar(); });
     marcar();
     if(hayMapa()){
       const m=L.map(cuerpo.querySelector('#rpMapa'),{zoomControl:false});
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(m);
-      const pin=(c,col,v)=>L.circleMarker([c.lat,c.lng],{radius:12,color:'#fff',weight:3,fillColor:col,fillOpacity:1}).addTo(m).on('click',()=>{ selUbic=v; marcar(); });
+      const pin=(c,col,v)=>L.circleMarker([c.lat,c.lng],{radius:12,color:'#fff',weight:3,fillColor:col,fillOpacity:1,bubblingMouseEvents:false}).addTo(m).on('click',()=>{ selUbic=v; marcar(); });
       pin(B,'#2D7FF9','b'); pin(A,'#F2B134','a');
+      mapaRp=m; m.on('click',e=>ponerOtra({lat:e.latlng.lat,lng:e.latlng.lng}));
       m.fitBounds([[A.lat,A.lng],[B.lat,B.lng]],{padding:[50,50],maxZoom:18});
       setTimeout(()=>{ try{ if(m._mapPane) m.invalidateSize(false); }catch(e){} },200);
     }
     cuerpo.querySelector('#rpUnir').onclick=async()=>{
-      const queda=selNombre==='a'?A:B, sale=selNombre==='a'?B:A, ubic=selUbic==='a'?A:B;
+      const queda=selNombre==='a'?A:B, sale=selNombre==='a'?B:A, ubic=selUbic==='c'?otra:(selUbic==='a'?A:B);
+      if(!ubic||ubic.lat==null){ toast('Toca el mapa para poner la ubicación'); return; }
       await unirClientes(queda,sale,ubic); unidos++; i++; toast('Clientes unidos'); pintar();
     };
     cuerpo.querySelector('#rpDistintos').onclick=()=>{
