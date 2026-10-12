@@ -354,6 +354,25 @@ function extraerCoords(texto){
 }
 const extraerEnlace = t => (String(t||'').match(/https?:\/\/\S+/)||[])[0]||'';
 
+/* Los enlaces cortos de Google Maps (maps.app.goo.gl) no traen coordenadas:
+   un servicio en Supabase los abre y nos regresa la dirección completa. */
+const EXPANDIR_URL = 'https://unprmjtvxyxyzbblynmd.supabase.co/functions/v1/expandir-mapa';
+const esEnlaceCorto = u => /^https:\/\/(maps\.app\.goo\.gl|goo\.gl\/maps|g\.co\/kgs)\//i.test(u||'');
+async function coordsDeTexto(texto){
+  const directas = extraerCoords(texto);
+  if(directas) return directas;
+  const enlace = extraerEnlace(texto);
+  if(!esEnlaceCorto(enlace) || !EXPANDIR_URL) return null;
+  const ctl = new AbortController(), t = setTimeout(()=>ctl.abort(), 9000);
+  try{
+    const r = await fetch(EXPANDIR_URL+'?url='+encodeURIComponent(enlace), {signal:ctl.signal});
+    if(!r.ok) return null;
+    const d = await r.json();
+    return extraerCoords(d.url||'');
+  }catch(e){ return null; }
+  finally{ clearTimeout(t); }
+}
+
 /* ================= Base de datos (en el teléfono) ================= */
 const DB={
   db:null,
@@ -510,7 +529,9 @@ function formCliente(existente=null,inicial={}){
       html:'<label class="campo"><input id="dEnl" placeholder="Pega aquí…"></label>',
       botones:[{txt:'Usar',clase:'oro',valor:v=>v.querySelector('#dEnl').value},{txt:'Cancelar',clase:'claro',valor:null}]});
     if(!v) return;
-    const p=extraerCoords(v);
+    const b=h.querySelector('#fEnlace'); b.disabled=true; b.textContent='Leyendo enlace…';
+    const p=await coordsDeTexto(v);
+    b.disabled=false; b.textContent='🔗 Pegar enlace';
     if(p){ c.lat=p.lat; c.lng=p.lng; c.enlace=extraerEnlace(v)||c.enlace; mc&&mc.poner(p); ubiTxt(); }
     else { c.enlace=extraerEnlace(v)||c.enlace; toast('Ese enlace no trae coordenadas. Usa “Mi ubicación actual” o toca el mapa.',4500); }
   };
@@ -903,9 +924,10 @@ async function revisarCompartido(){
   const texto=[p.get('title'),p.get('text'),p.get('url')].filter(Boolean).join(' ');
   if(!texto) return;
   history.replaceState(null,'',location.pathname);
-  let coords=extraerCoords(texto), aviso='';
   const enlace=extraerEnlace(texto);
-  if(coords){ aviso='📍 Ubicación recibida. Escribe el nombre del cliente.'; }
+  if(!extraerCoords(texto) && esEnlaceCorto(enlace)) toast('📍 Leyendo la ubicación compartida…',2500);
+  let coords=await coordsDeTexto(texto), aviso='';
+  if(coords){ aviso='📍 Ubicación recibida de Google Maps. Escribe el nombre del cliente.'; }
   else{
     try{ const pos=await obtenerPosicion(); coords={lat:pos.lat,lng:pos.lng};
       aviso=`📍 Se usó tu ubicación GPS actual (precisión ~${Math.round(pos.acc)} m). Si no estás en la casa del cliente, mueve el pin.`;

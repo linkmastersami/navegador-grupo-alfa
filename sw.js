@@ -1,5 +1,5 @@
 // Service worker: permite que la app abra sin internet y se pueda instalar.
-const VERSION = 'alfa-cobranza-v1';
+const VERSION = 'alfa-cobranza-v2';
 const BASE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -20,6 +20,8 @@ self.addEventListener('fetch', e => {
 
   // Mapas y cálculo de rutas: siempre en línea
   if (url.hostname.includes('tile.openstreetmap.org') || url.hostname.includes('project-osrm.org')) return;
+  // Servicio que lee los enlaces cortos de Google Maps: siempre en línea
+  if (url.hostname.endsWith('supabase.co')) return;
 
   // Páginas de la app: primero internet (para recibir actualizaciones), si no hay, la copia guardada
   if (req.mode === 'navigate') {
