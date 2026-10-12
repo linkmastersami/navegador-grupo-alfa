@@ -238,7 +238,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v5';
+const APP_VERSION='v6';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -880,11 +880,12 @@ function buscarRepetidos(){
   }
   return pares.sort((x,y)=>y.r-x.r||x.d-y.d);
 }
-async function unirClientes(queda,sale){
+async function unirClientes(queda,sale,ubic=queda){
   const u={...queda,
     telefono:queda.telefono||sale.telefono||'', referencia:queda.referencia||sale.referencia||'',
     foto:queda.foto||sale.foto||null, enlace:queda.enlace||sale.enlace||''};
-  if(u.lat==null && sale.lat!=null){ u.lat=sale.lat; u.lng=sale.lng; }
+  if(ubic.lat!=null){ u.lat=ubic.lat; u.lng=ubic.lng; }
+  else if(u.lat==null && sale.lat!=null){ u.lat=sale.lat; u.lng=sale.lng; }
   if(queda.visitas||sale.visitas){ u.visitas=(queda.visitas||0)+(sale.visitas||0); u.ultimaVisita=[queda.ultimaVisita,sale.ultimaVisita].filter(Boolean).sort().pop(); }
   await DB.poner('clientes',u); await DB.borrar('clientes',sale.id);
   clientes=clientes.filter(x=>x.id!==sale.id); clientes[clientes.findIndex(x=>x.id===u.id)]=u;
@@ -910,23 +911,38 @@ function revisarRepetidos(){
     cuerpo.innerHTML=`<p style="margin:0 0 10px;color:var(--suave)">${i+1} de ${pares.length} · las casas están a ${textoDist(d)} una de otra</p>
       ${tarjeta(A,'#F2B134')}${tarjeta(B,'#2D7FF9')}
       <div class="mapaForm" id="rpMapa" style="margin:4px 0 12px"></div>
+      <div class="campo" style="margin-bottom:10px"><span>¿Qué nombre se queda?</span>
+        <div class="motivos" id="rpNombre" style="margin:0"><button type="button" data-v="a">${esc(A.nombre)}</button><button type="button" data-v="b">${esc(B.nombre)}</button></div></div>
+      <div class="campo" style="margin-bottom:12px"><span>¿Qué ubicación se queda? <span class="opcional">(también puedes tocar el pin)</span></span>
+        <div class="motivos" id="rpUbic" style="margin:0"><button type="button" data-v="a">🟡 Pin amarillo</button><button type="button" data-v="b">🔵 Pin azul</button></div></div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <button class="btn oro" data-q="a">Unir y dejar «${esc(A.nombre)}»</button>
-        <button class="btn claro" data-q="b">Unir y dejar «${esc(B.nombre)}»</button>
+        <button class="btn oro" id="rpUnir">Unir</button>
         <div class="fila"><button class="btn rojo" id="rpDistintos">Son personas distintas</button><button class="btn borde" id="rpSaltar">Saltar</button></div>
       </div>`;
+    // Por omisión se sugiere el que tiene más visitas
+    const sug=(B.visitas||0)>(A.visitas||0)?'b':'a';
+    let selNombre=sug, selUbic=sug;
+    const marcar=()=>{
+      cuerpo.querySelectorAll('#rpNombre button').forEach(x=>x.classList.toggle('sel',x.dataset.v===selNombre));
+      cuerpo.querySelectorAll('#rpUbic button').forEach(x=>x.classList.toggle('sel',x.dataset.v===selUbic));
+      const n=selNombre==='a'?A:B;
+      cuerpo.querySelector('#rpUnir').textContent=`Unir como «${n.nombre}» con el pin ${selUbic==='a'?'amarillo':'azul'}`;
+    };
+    cuerpo.querySelectorAll('#rpNombre button').forEach(x=>x.onclick=()=>{ selNombre=x.dataset.v; marcar(); });
+    cuerpo.querySelectorAll('#rpUbic button').forEach(x=>x.onclick=()=>{ selUbic=x.dataset.v; marcar(); });
+    marcar();
     if(hayMapa()){
       const m=L.map(cuerpo.querySelector('#rpMapa'),{zoomControl:false});
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(m);
-      const pin=(c,col)=>L.circleMarker([c.lat,c.lng],{radius:10,color:'#fff',weight:3,fillColor:col,fillOpacity:1}).addTo(m);
-      pin(B,'#2D7FF9'); pin(A,'#F2B134');
+      const pin=(c,col,v)=>L.circleMarker([c.lat,c.lng],{radius:12,color:'#fff',weight:3,fillColor:col,fillOpacity:1}).addTo(m).on('click',()=>{ selUbic=v; marcar(); });
+      pin(B,'#2D7FF9','b'); pin(A,'#F2B134','a');
       m.fitBounds([[A.lat,A.lng],[B.lat,B.lng]],{padding:[50,50],maxZoom:18});
       setTimeout(()=>m.invalidateSize(),200);
     }
-    cuerpo.querySelectorAll('[data-q]').forEach(btn=>btn.onclick=async()=>{
-      const queda=btn.dataset.q==='a'?A:B, sale=btn.dataset.q==='a'?B:A;
-      await unirClientes(queda,sale); unidos++; i++; toast('Clientes unidos'); pintar();
-    });
+    cuerpo.querySelector('#rpUnir').onclick=async()=>{
+      const queda=selNombre==='a'?A:B, sale=selNombre==='a'?B:A, ubic=selUbic==='a'?A:B;
+      await unirClientes(queda,sale,ubic); unidos++; i++; toast('Clientes unidos'); pintar();
+    };
     cuerpo.querySelector('#rpDistintos').onclick=()=>{
       const s=distintos(); s.add(clavePar(A.id,B.id)); try{ localStorage.setItem(DIST_KEY,JSON.stringify([...s])); }catch(e){}
       i++; pintar();
