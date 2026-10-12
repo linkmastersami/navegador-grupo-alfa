@@ -241,7 +241,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v7';
+const APP_VERSION='v8';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -582,6 +582,7 @@ function verCliente(id){
       <div class="renglon"><div class="izq"><small>Nombre</small>${esc(c.nombre)}</div></div>
       ${c.telefono?`<div class="renglon"><div class="izq"><small>Teléfono</small><a href="tel:${esc(c.telefono)}">${esc(c.telefono)}</a></div></div>`:''}
       ${c.referencia?`<div class="renglon"><div class="izq"><small>Referencias</small>${esc(c.referencia)}</div></div>`:''}
+      ${c.origen&&c.origen.startsWith('Oficina')?`<div class="renglon"><div class="izq"><small>Origen</small>Ubicación enviada por la ${esc(c.origen.toLowerCase())}</div></div>`:''}
       ${c.visitas?`<div class="renglon"><div class="izq"><small>Historial (importado de WhatsApp)</small>${c.visitas} visita(s) · última: ${new Date(c.ultimaVisita+'T12:00').toLocaleDateString('es-MX')}</div></div>`:''}
       <div class="renglon"><div class="izq"><small>Ubicación</small>${c.lat!=null?`${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`:'Sin ubicación'}</div></div>
     </div>
@@ -983,6 +984,7 @@ function revisarTodos(){
       <div style="display:flex;justify-content:space-between;color:var(--suave);font-size:14px;margin-bottom:6px"><span>Verificados: <b style="color:var(--verde)">${ver}</b> de ${total}</span><span>Faltan ${cola.length}</span></div>
       <div style="height:6px;background:#E1E6EC;border-radius:6px;overflow:hidden;margin-bottom:12px"><div style="height:100%;width:${Math.round(ver/total*100)}%;background:var(--verde)"></div></div>
       <label class="campo" style="margin-bottom:8px"><span>Nombre <span class="opcional">(corrígelo si está mal escrito)</span></span><input id="rtNombre" value="${esc(c.nombre)}" autocomplete="off"></label>
+      <label class="campo" style="margin-bottom:8px"><span>Teléfono ${c.telefono?`<a href="tel:${esc(c.telefono)}" style="font-weight:400">· llamar</a>`:'<span class="opcional">(opcional)</span>'}</span><input id="rtTel" type="tel" inputmode="tel" value="${esc(c.telefono||'')}" placeholder="10 dígitos"></label>
       <small style="display:block;color:var(--suave);margin:-2px 0 8px">${c.visitas?`${c.visitas} visita(s) · última ${new Date(c.ultimaVisita+'T12:00').toLocaleDateString('es-MX')}`:'Registrado en la app'}${c.referencia?' · '+esc(c.referencia):''}</small>
       ${c.foto?`<img class="foto" src="${c.foto}" alt="Fachada" style="max-height:150px;margin-bottom:8px">`:''}
       <div class="campo" style="margin-bottom:12px"><span>Ubicación <span class="opcional">(arrastra el pin o toca el mapa si no está bien)</span></span>
@@ -997,7 +999,7 @@ function revisarTodos(){
     cuerpo.querySelector('#rtBien').onclick=async()=>{
       const nombre=cuerpo.querySelector('#rtNombre').value.trim().replace(/\s+/g,' ');
       if(!nombre){ toast('El nombre no puede quedar vacío'); return; }
-      const u={...cliente(c.id),nombre,verificado:new Date().toISOString(),editado:new Date().toISOString()};
+      const u={...cliente(c.id),nombre,telefono:cuerpo.querySelector('#rtTel').value.trim(),verificado:new Date().toISOString(),editado:new Date().toISOString()};
       if(pos){ u.lat=pos.lat; u.lng=pos.lng; }
       await DB.poner('clientes',u); clientes[clientes.findIndex(x=>x.id===u.id)]=u;
       cola.shift(); hechos++; pintar();
@@ -1127,13 +1129,23 @@ $('#archivoImportar').onchange=async e=>{
       if(!c||!c.id||!c.nombre) continue;
       const mismo=clientes.find(x=>x.id===c.id) || porNombre.get(norm(c.nombre));
       if(!mismo){ nuevos.push(c); porNombre.set(norm(c.nombre),c); continue; }
-      if(mismo.id===c.id){ if(!mismo.editado || (c.editado && c.editado>mismo.editado)) actualizados.push(c); else repetidos++; continue; }
+      const CAMPOS=['telefono','referencia','foto','enlace'];
+      if(mismo.id===c.id && (!mismo.editado || (c.editado && c.editado>mismo.editado))){
+        // No lo has corregido en la app: se toma el del archivo, sin perder datos que solo tenías tú
+        const u={...c}; CAMPOS.forEach(k=>{ if(!u[k] && mismo[k]) u[k]=mismo[k]; });
+        if(u.lat==null && mismo.lat!=null){ u.lat=mismo.lat; u.lng=mismo.lng; }
+        u.verificado=u.verificado||mismo.verificado||null; actualizados.push(u); continue;
+      }
+      // Ya lo tienes (o lo corregiste): solo se completan los datos que le faltan
       repetidos++;
-      if(mismo.lat==null && c.lat!=null) actualizados.push({...mismo,lat:c.lat,lng:c.lng});
+      const u={...mismo}; let cambio=false;
+      CAMPOS.forEach(k=>{ if(!u[k] && c[k]){ u[k]=c[k]; cambio=true; } });
+      if(u.lat==null && c.lat!=null){ u.lat=c.lat; u.lng=c.lng; cambio=true; }
+      if(cambio) actualizados.push(u);
     }
     const texto=`Se agregarán <b>${nuevos.length}</b> cliente(s) nuevo(s)`+
-      (actualizados.length?`, se actualizarán ${actualizados.length}`:'')+
-      (repetidos?` y ${repetidos} ya los tienes con el mismo nombre (se conservan los tuyos)`:'')+
+      (actualizados.length?` y se actualizarán <b>${actualizados.length}</b> que ya tienes (se les agregan los datos que les faltaban, como el teléfono)`:'')+
+      (repetidos?`. Lo que corregiste en la app no se cambia`:'')+
       (d.rutas.length?`. También ${d.rutas.length} ruta(s) del historial`:'')+'.';
     if(!(await confirmar('Cargar respaldo',texto,'Cargar'))) return;
     await DB.ponerVarios('clientes',[...nuevos,...actualizados]);
