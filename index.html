@@ -181,7 +181,10 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
       (Funciona en Android con la app instalada.) <a href="#" id="cerrarTip">Entendido</a>
     </div>
     <div class="buscador"><input id="buscarCliente" type="search" placeholder="Buscar cliente por nombre…" autocomplete="off"></div>
-    <button class="btn borde ancho oculto" id="btnRepetidos" style="margin-bottom:12px">🔁 Revisar posibles repetidos</button>
+    <div class="fila oculto" id="filaRevisar" style="margin-bottom:12px">
+      <button class="btn borde" id="btnRevisar">✅ Revisar todos</button>
+      <button class="btn borde" id="btnRepetidos">🔁 Repetidos</button>
+    </div>
     <div class="lista" id="listaClientes"></div>
   </section>
 
@@ -238,7 +241,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v6';
+const APP_VERSION='v7';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -463,12 +466,14 @@ function pintarClientes(){
   const cont=$('#listaClientes');
   if(!clientes.length){ cont.innerHTML=`<div class="vacio"><div class="icono">👥</div>Aún no tienes clientes registrados.<br>Toca <b>+ Nuevo cliente</b> o comparte tu ubicación desde Google Maps.</div>`; return; }
   if(!lista.length){ cont.innerHTML=`<div class="vacio">No hay clientes que coincidan con “${esc($('#buscarCliente').value)}”.</div>`; return; }
-  $('#btnRepetidos').classList.toggle('oculto',clientes.length<2||!!q);
+  $('#filaRevisar').classList.toggle('oculto',!clientes.length||!!q);
+  const nVer=clientes.filter(c=>c.verificado).length;
+  $('#btnRevisar').textContent=nVer>=clientes.length?'✅ Todos verificados':`✅ Revisar todos (${nVer}/${clientes.length})`;
   const MAX=150, visibles=lista.slice(0,MAX);
   const cuenta=`<div style="color:var(--suave);font-size:13px;margin:-4px 0 4px">${q?`${lista.length} encontrado(s)`:`${clientes.length} clientes`}${lista.length>MAX?` · mostrando ${MAX}, escribe el nombre para buscar`:''}</div>`;
   cont.innerHTML=cuenta+visibles.map(c=>`<button class="cliente" data-id="${c.id}">${miniatura(c)}
     <div class="datos"><b>${esc(c.nombre)}</b><small>${c.lat!=null?'📍 Con ubicación':'<span class="chip rojo">Sin ubicación</span>'}${c.telefono?' · 📞 '+esc(c.telefono):''}</small></div>
-    ${R.lista.includes(c.id)?'<span class="chip oro accion">En ruta</span>':''}</button>`).join('');
+    ${R.lista.includes(c.id)?'<span class="chip oro accion">En ruta</span>':(c.verificado?'<span class="chip verde accion">✓</span>':'')}</button>`).join('');
   cont.querySelectorAll('.cliente').forEach(b=>b.onclick=()=>verCliente(b.dataset.id));
 }
 $('#buscarCliente').addEventListener('input',pintarClientes);
@@ -488,10 +493,11 @@ function mapaChico(el,pos,arrastrable,alMover){
   const m=L.map(el,{zoomControl:true,attributionControl:true}).setView([centro.lat,centro.lng],pos?17:11);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(m);
   let mk=null;
-  const poner=p=>{ if(!mk){ mk=L.marker([p.lat,p.lng],{draggable:arrastrable}).addTo(m); if(arrastrable) mk.on('dragend',()=>{const ll=mk.getLatLng(); alMover&&alMover({lat:ll.lat,lng:ll.lng});}); } else mk.setLatLng([p.lat,p.lng]); };
+  const icono=L.divIcon({className:'',html:'<div class="marcadorDest"><span>●</span></div>',iconSize:[34,34],iconAnchor:[17,34]});
+  const poner=p=>{ if(!mk){ mk=L.marker([p.lat,p.lng],{draggable:arrastrable,icon:icono}).addTo(m); if(arrastrable) mk.on('dragend',()=>{const ll=mk.getLatLng(); alMover&&alMover({lat:ll.lat,lng:ll.lng});}); } else mk.setLatLng([p.lat,p.lng]); };
   if(pos) poner(pos);
   if(arrastrable) m.on('click',e=>{ poner({lat:e.latlng.lat,lng:e.latlng.lng}); alMover&&alMover({lat:e.latlng.lat,lng:e.latlng.lng}); });
-  setTimeout(()=>m.invalidateSize(),250);
+  setTimeout(()=>{ try{ if(m._mapPane) m.invalidateSize(false); }catch(e){} },250);
   return {mapa:m, poner:(p,zoom=true)=>{poner(p); if(zoom) m.setView([p.lat,p.lng],17);}};
 }
 
@@ -556,6 +562,7 @@ function formCliente(existente=null,inicial={},alGuardar=null){
     if(dup && !(await confirmar('Nombre repetido',`Ya existe un cliente llamado <b>${esc(dup.nombre)}</b>. ¿Es una persona distinta y quieres guardarlo de todos modos?`,'Guardar de todos modos'))) return;
     if(c.lat==null && !(await confirmar('Sin ubicación','Este cliente no tiene ubicación, así que no podrá ordenarse por cercanía en la ruta. ¿Guardar así?','Guardar sin ubicación'))) return;
     delete c._aviso;
+    c.editado=new Date().toISOString();
     await DB.poner('clientes',c);
     const i=clientes.findIndex(x=>x.id===c.id); if(i>=0) clientes[i]=c; else clientes.push(c);
     h.remove(); document.querySelectorAll('.hoja').forEach(x=>x.remove());
@@ -752,7 +759,7 @@ function iniciarNavegacion(id,reanudando=false){
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(m);
     if(!sinUb) L.marker([c.lat,c.lng],{icon:iconoDest()}).addTo(m);
     m.on('dragstart',()=>NAV&&(NAV.seguir=false));
-    NAV.map=m; setTimeout(()=>m.invalidateSize(),200);
+    NAV.map=m; setTimeout(()=>{ try{ if(m._mapPane) m.invalidateSize(false); }catch(e){} },200);
   }else{
     $('#mapaNav').innerHTML='<div class="vacio">Sin conexión para cargar el mapa. Puedes usar el botón de Google Maps.</div>';
   }
@@ -822,7 +829,7 @@ async function alMoverse(p){
 
 /* ---- Corregir la ubicación del cliente durante la ruta ---- */
 async function guardarUbicacion(c,p){
-  const nuevo={...cliente(c.id),lat:p.lat,lng:p.lng};
+  const nuevo={...cliente(c.id),lat:p.lat,lng:p.lng,editado:new Date().toISOString()};
   await DB.poner('clientes',nuevo);
   clientes[clientes.findIndex(x=>x.id===c.id)]=nuevo;
   return nuevo;
@@ -881,7 +888,7 @@ function buscarRepetidos(){
   return pares.sort((x,y)=>y.r-x.r||x.d-y.d);
 }
 async function unirClientes(queda,sale,ubic=queda){
-  const u={...queda,
+  const u={...queda, editado:new Date().toISOString(), verificado:queda.verificado||sale.verificado||null,
     telefono:queda.telefono||sale.telefono||'', referencia:queda.referencia||sale.referencia||'',
     foto:queda.foto||sale.foto||null, enlace:queda.enlace||sale.enlace||''};
   if(ubic.lat!=null){ u.lat=ubic.lat; u.lng=ubic.lng; }
@@ -937,7 +944,7 @@ function revisarRepetidos(){
       const pin=(c,col,v)=>L.circleMarker([c.lat,c.lng],{radius:12,color:'#fff',weight:3,fillColor:col,fillOpacity:1}).addTo(m).on('click',()=>{ selUbic=v; marcar(); });
       pin(B,'#2D7FF9','b'); pin(A,'#F2B134','a');
       m.fitBounds([[A.lat,A.lng],[B.lat,B.lng]],{padding:[50,50],maxZoom:18});
-      setTimeout(()=>m.invalidateSize(),200);
+      setTimeout(()=>{ try{ if(m._mapPane) m.invalidateSize(false); }catch(e){} },200);
     }
     cuerpo.querySelector('#rpUnir').onclick=async()=>{
       const queda=selNombre==='a'?A:B, sale=selNombre==='a'?B:A, ubic=selUbic==='a'?A:B;
@@ -953,6 +960,59 @@ function revisarRepetidos(){
   pintar();
 }
 $('#btnRepetidos').onclick=revisarRepetidos;
+
+/* ---- Revisar todos los clientes uno por uno; los verificados ya no vuelven a salir ---- */
+function revisarTodos(){
+  // Primero los registrados en la app y los visitados más recientemente
+  const orden=c=>c.ultimaVisita||'9999';
+  let cola=clientes.filter(c=>!c.verificado).sort((a,b)=>orden(b).localeCompare(orden(a))||a.nombre.localeCompare(b.nombre,'es')).map(c=>c.id);
+  let hechos=0, mapa=null;
+  const h=abrirHoja('Revisar clientes','<div id="rtCuerpo"></div>');
+  const cuerpo=h.querySelector('#rtCuerpo');
+  h.querySelector('[data-cerrar]').onclick=()=>{ h.remove(); pintarClientes(); };
+  const pintar=()=>{
+    if(mapa){ try{ mapa.off(); mapa.remove(); }catch(e){} mapa=null; }
+    while(cola.length && (!cliente(cola[0])||cliente(cola[0]).verificado)) cola.shift();
+    const total=clientes.length, ver=clientes.filter(c=>c.verificado).length;
+    if(!cola.length){
+      cuerpo.innerHTML=`<div class="vacio"><div class="icono">✅</div>¡Listo! Todos tus clientes están verificados.</div><button class="btn oro ancho" id="rtListo">Terminar</button>`;
+      cuerpo.querySelector('#rtListo').onclick=()=>{ h.remove(); pintarClientes(); }; return;
+    }
+    const c=cliente(cola[0]); let pos=c.lat!=null?{lat:c.lat,lng:c.lng}:null;
+    cuerpo.innerHTML=`
+      <div style="display:flex;justify-content:space-between;color:var(--suave);font-size:14px;margin-bottom:6px"><span>Verificados: <b style="color:var(--verde)">${ver}</b> de ${total}</span><span>Faltan ${cola.length}</span></div>
+      <div style="height:6px;background:#E1E6EC;border-radius:6px;overflow:hidden;margin-bottom:12px"><div style="height:100%;width:${Math.round(ver/total*100)}%;background:var(--verde)"></div></div>
+      <label class="campo" style="margin-bottom:8px"><span>Nombre <span class="opcional">(corrígelo si está mal escrito)</span></span><input id="rtNombre" value="${esc(c.nombre)}" autocomplete="off"></label>
+      <small style="display:block;color:var(--suave);margin:-2px 0 8px">${c.visitas?`${c.visitas} visita(s) · última ${new Date(c.ultimaVisita+'T12:00').toLocaleDateString('es-MX')}`:'Registrado en la app'}${c.referencia?' · '+esc(c.referencia):''}</small>
+      ${c.foto?`<img class="foto" src="${c.foto}" alt="Fachada" style="max-height:150px;margin-bottom:8px">`:''}
+      <div class="campo" style="margin-bottom:12px"><span>Ubicación <span class="opcional">(arrastra el pin o toca el mapa si no está bien)</span></span>
+        <div class="mapaForm" id="rtMapa" style="height:260px"></div>
+        <small id="rtUbi" style="display:block;margin-top:4px;color:var(--suave)">${pos?'':'Sin ubicación: toca el mapa para ponerla.'}</small></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn verde" id="rtBien">✓ Está bien, siguiente</button>
+        <div class="fila"><button class="btn borde" id="rtSaltar">Saltar por ahora</button><button class="btn rojo" id="rtBorrar">Eliminar</button></div>
+      </div>`;
+    const mc=mapaChico(cuerpo.querySelector('#rtMapa'),pos,true,p=>{ pos=p; cuerpo.querySelector('#rtUbi').textContent='Pin movido: se guardará la nueva ubicación.'; });
+    if(mc){ mapa=mc.mapa; if(pos) mapa.setView([pos.lat,pos.lng],18,{animate:false}); }
+    cuerpo.querySelector('#rtBien').onclick=async()=>{
+      const nombre=cuerpo.querySelector('#rtNombre').value.trim().replace(/\s+/g,' ');
+      if(!nombre){ toast('El nombre no puede quedar vacío'); return; }
+      const u={...cliente(c.id),nombre,verificado:new Date().toISOString(),editado:new Date().toISOString()};
+      if(pos){ u.lat=pos.lat; u.lng=pos.lng; }
+      await DB.poner('clientes',u); clientes[clientes.findIndex(x=>x.id===u.id)]=u;
+      cola.shift(); hechos++; pintar();
+    };
+    cuerpo.querySelector('#rtSaltar').onclick=()=>{ cola.push(cola.shift()); pintar(); };
+    cuerpo.querySelector('#rtBorrar').onclick=async()=>{
+      if(!(await confirmar('Eliminar cliente',`¿Eliminar a <b>${esc(c.nombre)}</b>? Ya no aparecerá en la app.`,'Eliminar','rojo'))) return;
+      await DB.borrar('clientes',c.id); clientes=clientes.filter(x=>x.id!==c.id);
+      R.lista=R.lista.filter(x=>x!==c.id); R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta();
+      cola.shift(); pintar();
+    };
+  };
+  pintar();
+}
+$('#btnRevisar').onclick=revisarTodos;
 
 function detenerNavegacion(){
   if(!NAV) return;
@@ -1067,7 +1127,7 @@ $('#archivoImportar').onchange=async e=>{
       if(!c||!c.id||!c.nombre) continue;
       const mismo=clientes.find(x=>x.id===c.id) || porNombre.get(norm(c.nombre));
       if(!mismo){ nuevos.push(c); porNombre.set(norm(c.nombre),c); continue; }
-      if(mismo.id===c.id){ actualizados.push(c); continue; }
+      if(mismo.id===c.id){ if(!mismo.editado || (c.editado && c.editado>mismo.editado)) actualizados.push(c); else repetidos++; continue; }
       repetidos++;
       if(mismo.lat==null && c.lat!=null) actualizados.push({...mismo,lat:c.lat,lng:c.lng});
     }
