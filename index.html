@@ -319,7 +319,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v26';
+const APP_VERSION='v27';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -1202,6 +1202,11 @@ function pintarOrden(){
     ${R.cobros.length||R.cancelados.length?`<h3>Ya visitados</h3><div class="tarjeta">${R.cobros.map(x=>`<div class="renglon"><div class="izq">✓ ${esc(x.nombre)}</div><div class="der">${fmt(x.monto)}</div></div>`).join('')}${R.cancelados.map(x=>`<div class="renglon"><div class="izq">✗ ${esc(x.nombre)}<small>${esc(x.motivo)}</small></div></div>`).join('')}</div>`:''}`;
   el.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>irCon(b.dataset.ir));
   $('#oAgregar').onclick=()=>agregarEnRuta(()=>pintarOrden());
+}
+
+function reanudarRuta(){
+  if(R.actual && cliente(R.actual) && R.pendientes.includes(R.actual)) iniciarNavegacion(R.actual,true);
+  else mostrarEleccion(R.cobros.length+R.cancelados.length>0);
 }
 
 async function mostrarEleccion(auto=false){
