@@ -243,7 +243,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v10';
+const APP_VERSION='v11';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -567,8 +567,9 @@ function formCliente(existente=null,inicial={},alGuardar=null){
     c.editado=new Date().toISOString();
     await DB.poner('clientes',c);
     const i=clientes.findIndex(x=>x.id===c.id); if(i>=0) clientes[i]=c; else clientes.push(c);
-    h.remove(); document.querySelectorAll('.hoja').forEach(x=>x.remove());
-    if(alGuardar){ toast('Ubicación del cliente actualizada'); alGuardar(c); return; }
+    h.remove();
+    if(alGuardar){ alGuardar(c); return; }
+    document.querySelectorAll('.hoja').forEach(x=>x.remove());
     toast(existente?'Cliente actualizado':'Cliente guardado');
     pintarClientes(); if(tabActual==='ruta') pintarArmado();
   };
@@ -687,7 +688,7 @@ function puntajeNombre(leidas,c){
   let hits=0, suma=0;
   for(const t of ct){ let mejor=0; for(const l of leidas){ const r=parecido(t,l); if(r>mejor) mejor=r; } if(mejor>=0.75){ hits++; suma+=mejor; } }
   if(hits<Math.min(2,ct.length)) return 0;
-  return (suma/ct.length)*0.75 + (hits/Math.max(leidas.length,ct.length))*0.25;
+  return (suma/ct.length)*0.75 + (hits/Math.max(leidas.length,ct.length))*0.25 - (leidas.length>hits?0.0001:0);
 }
 function buscarEnFoto(lineas){
   const vistos=new Set(), res=[];
@@ -695,6 +696,12 @@ function buscarEnFoto(lineas){
     const leidas=palabrasLeidas(linea); if(leidas.length<2) continue;
     const firma=leidas.join(' '); if(vistos.has(firma)) continue; vistos.add(firma);
     const cands=clientes.map(c=>({c,p:puntajeNombre(leidas,c)})).filter(x=>x.p>=0.5).sort((a,b)=>b.p-a.p).slice(0,3);
+    const soloNombre=palabrasLeidas((linea.split(/[|—\d]/)[0]||linea));
+    cands.forEach(x=>{ const ct=norm(x.c.nombre).split(' ').filter(t=>t.length>1&&!VACIAS.has(t)); x.faltan=soloNombre.filter(l=>!ct.some(t=>parecido(t,l)>=0.75)).length; });
+    // Renglones sin cliente: solo si parecen un nombre de verdad (no restos de la tabla)
+    const letras=(linea.match(/[a-záéíóúñü ]/gi)||[]).length/Math.max(1,linea.replace(/\s/g,'').length+ (linea.match(/ /g)||[]).length);
+    const palabrasReales=leidas.filter(t=>t.length>=3&&/[aeiou]/.test(t)).length;
+    if(!cands.length && (palabrasReales<2 || letras<0.75)) continue;
     const texto=(linea.split(/[|—\d]/)[0]||linea).trim().replace(/\s+/g,' ')||linea.trim();
     res.push({texto,leidas,cands});
   }
@@ -721,30 +728,63 @@ async function leerFotoLista(file){
     h.querySelector('#fCarga').innerHTML=`<div class="vacio"><div class="icono">⚠️</div>${esc(e.message||'No se pudo leer la foto')}</div>`;
   }finally{ if(worker) worker.terminate(); }
 }
+const MINUS=new Set(['de','del','la','las','los','y']);
+const titulo=t=>t.toLowerCase().split(' ').filter(Boolean).map((w,i)=>i&&MINUS.has(w)?w:w[0].toUpperCase()+w.slice(1)).join(' ');
+const faltanEn=(texto,c)=>{ if(!c) return 0; const ct=norm(c.nombre).split(' ').filter(t=>t.length>1&&!VACIAS.has(t)); return palabrasLeidas(texto).filter(l=>!ct.some(t=>parecido(t,l)>=0.75)).length; };
 function mostrarResultadosFoto(h,res){
   h.querySelector('#fCarga').remove();
   const cont=h.querySelector('#fRes');
-  const hallados=res.filter(r=>r.cands.length), sin=res.filter(r=>!r.cands.length&&r.leidas.length>=2);
-  if(!hallados.length){ cont.innerHTML=`<div class="vacio"><div class="icono">🔍</div>No encontré a ningún cliente en la foto.<br>Toma la foto de frente, con buena luz y que se vea bien la columna de nombres.</div>`; return; }
+  const filas=res.filter(r=>r.cands.length||r.leidas.length>=2);
+  if(!filas.length){ cont.innerHTML=`<div class="vacio"><div class="icono">🔍</div>No encontré nombres en la foto.<br>Toma la foto de frente, con buena luz y que se vea bien la columna de nombres.</div>`; return; }
   const sel={}; const usados=new Set();
-  hallados.forEach((r,i)=>{
-    const c=r.cands[0];
+  filas.forEach((r,i)=>{
+    const c=r.cands[0]; if(!c){ sel[i]=null; return; }
     if(usados.has(c.c.id)){ r.repetido=true; sel[i]=null; return; }   // la misma persona viene dos veces en la hoja
     if(c.p>=0.6){ sel[i]=c.c.id; usados.add(c.c.id); } else sel[i]=null;
   });
   const pintar=()=>{
     const n=Object.values(sel).filter(id=>id&&!R.lista.includes(id)).length;
-    cont.innerHTML=`<p style="margin:0 0 12px;color:var(--suave)">Encontré <b>${hallados.length}</b> nombre(s). Revisa que cada uno sea el cliente correcto:</p>
-      ${hallados.map((r,i)=>`<div class="tarjeta" style="margin-bottom:10px">
-        <small style="color:var(--suave)">En la foto dice: <b style="color:var(--texto)">${esc(r.texto)}</b>${r.repetido?' <span class="chip oro">Repetido en la foto</span>':''}${!r.repetido&&r.cands[0].p<0.6?' <span class="chip rojo">Revisa</span>':''}</small>
-        <div class="motivos" style="margin:8px 0 0">${r.cands.map(x=>`<button type="button" data-i="${i}" data-id="${x.c.id}" class="${sel[i]===x.c.id?'sel':''}">${esc(x.c.nombre)}${x.c.lat==null?' ⚠️':''}${R.lista.includes(x.c.id)?' (ya en ruta)':''}</button>`).join('')}
-          <button type="button" data-i="${i}" data-id="" class="${!sel[i]?'sel':''}">Ninguno</button></div></div>`).join('')}
-      ${sin.length?`<details style="margin:6px 0 12px;color:var(--suave)"><summary>No reconocí ${sin.length} renglón(es)</summary><p style="font-size:14px">${sin.map(r=>esc(r.texto)).join('<br>')}</p><p style="font-size:13px">Puedes agregarlos escribiendo su nombre arriba.</p></details>`:''}
+    const conCliente=filas.filter(r=>r.cands.length).length;
+    cont.innerHTML=`<p style="margin:0 0 12px;color:var(--suave)">Leí <b>${filas.length}</b> nombre(s)${conCliente<filas.length?` · ${filas.length-conCliente} no están en tus clientes`:''}. Revisa cada uno:</p>
+      ${filas.map((r,i)=>{
+        const elegido=sel[i]&&cliente(sel[i]);
+        const elegidoC=sel[i]&&r.cands.find(x=>x.c.id===sel[i]);
+        const etiqueta=r.repetido?' <span class="chip oro">Repetido en la foto</span>':(r.nuevo?' <span class="chip verde">Cliente nuevo</span>':(!r.cands.length?' <span class="chip rojo">No está en tus clientes</span>':((r.cands[0].p<0.6||(elegidoC&&faltanEn(r.texto,cliente(sel[i]))))?' <span class="chip rojo">Revisa</span>':'')));
+        const distinto=elegido && norm(elegido.nombre)!==norm(r.texto);
+        return `<div class="tarjeta" style="margin-bottom:10px">
+        <small style="color:var(--suave)">En la foto dice: <b style="color:var(--texto)">${esc(r.texto)}</b>${etiqueta}</small>
+        ${r.cands.length?`<div class="motivos" style="margin:8px 0 0">${r.cands.map(x=>`<button type="button" data-i="${i}" data-id="${x.c.id}" class="${sel[i]===x.c.id?'sel':''}">${esc(cliente(x.c.id)?cliente(x.c.id).nombre:x.c.nombre)}${(cliente(x.c.id)||x.c).lat==null?' ⚠️':''}${R.lista.includes(x.c.id)?' (ya en ruta)':''}</button>`).join('')}
+          <button type="button" data-i="${i}" data-id="" class="${!sel[i]?'sel':''}">Ninguno</button></div>`:''}
+        <div class="fila" style="margin-top:8px;flex-wrap:wrap">
+          ${elegido&&distinto?`<button class="btn claro" data-renombrar="${i}" style="min-height:38px;padding:8px 12px;font-size:14px">✏️ Corregir nombre</button>`:''}
+          ${!r.nuevo?`<button class="btn ${r.cands.length?'borde':'oro'}" data-nuevo="${i}" style="min-height:38px;padding:8px 12px;font-size:14px">➕ ${r.cands.length?'Es un cliente nuevo':'Agregar como cliente nuevo'}</button>`:''}
+        </div></div>`;}).join('')}
       <button class="btn oro ancho" id="fAgregar" ${n?'':'disabled'}>Agregar ${n} a la lista de cobranza</button>`;
     cont.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ sel[b.dataset.i]=b.dataset.id||null; pintar(); });
+    // Cambiar el nombre del cliente elegido por el que viene en la foto (editable)
+    cont.querySelectorAll('[data-renombrar]').forEach(b=>b.onclick=async()=>{
+      const i=+b.dataset.renombrar, c=cliente(sel[i]); if(!c) return;
+      const nuevo=await dialogo({titulo:'Corregir nombre',texto:`Ahora se llama <b>${esc(c.nombre)}</b>. Escribe el nombre correcto:`,
+        html:`<label class="campo"><input id="dNom" value="${esc(titulo(filas[i].texto))}" autocomplete="off"></label>`,
+        alAbrir:v=>setTimeout(()=>{ const x=v.querySelector('#dNom'); x.focus(); x.select(); },250),
+        botones:[{txt:'Guardar nombre',clase:'oro',valor:v=>{ const t=v.querySelector('#dNom').value.trim().replace(/\s+/g,' '); if(!t){ toast('Escribe el nombre'); return undefined; } return t; }},
+                 {txt:'Cancelar',clase:'claro',valor:null}]});
+      if(!nuevo) return;
+      const u={...c,nombre:nuevo,editado:new Date().toISOString()};
+      await DB.poner('clientes',u); clientes[clientes.findIndex(x=>x.id===u.id)]=u;
+      toast('Nombre actualizado'); pintar();
+    });
+    // Registrar a la persona como cliente nuevo, con el nombre de la foto ya escrito
+    cont.querySelectorAll('[data-nuevo]').forEach(b=>b.onclick=()=>{
+      const i=+b.dataset.nuevo;
+      formCliente(null,{nombre:titulo(filas[i].texto),_aviso:'Cliente nuevo desde la foto de la lista. Ponle su ubicación (toca el mapa, usa tu ubicación o pega un enlace) y, si quieres, su teléfono y foto.'},c=>{
+        filas[i].cands.unshift({c,p:1}); filas[i].nuevo=true; filas[i].repetido=false; sel[i]=c.id;
+        toast('Cliente guardado'); pintar();
+      });
+    });
     cont.querySelector('#fAgregar').onclick=()=>{
       let k=0; Object.values(sel).forEach(id=>{ if(id&&!R.lista.includes(id)){ R.lista.push(id); k++; } });
-      guardarRuta(); h.remove(); pintarArmado(); toast(`${k} cliente(s) agregado(s) a la ruta`);
+      guardarRuta(); h.remove(); pintarArmado(); pintarClientes(); toast(`${k} cliente(s) agregado(s) a la ruta`);
     };
   };
   pintar();
@@ -951,7 +991,7 @@ async function corregirUbicacion(c){
     await guardarUbicacion(c,p); toast('Ubicación del cliente actualizada');
     iniciarNavegacion(c.id,true);
   }else if(op==='mapa'){
-    formCliente(cliente(c.id),{},()=>iniciarNavegacion(c.id,true));
+    formCliente(cliente(c.id),{},()=>{ toast('Ubicación del cliente actualizada'); iniciarNavegacion(c.id,true); });
   }
 }
 async function ofrecerGuardarAqui(c){
