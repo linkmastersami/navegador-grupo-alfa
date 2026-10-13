@@ -1,5 +1,5 @@
 // Service worker: permite que la app abra sin internet y se pueda instalar.
-const VERSION = 'alfa-cobranza-v21';
+const VERSION = 'alfa-cobranza-v22';
 const BASE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
