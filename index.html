@@ -247,7 +247,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v15';
+const APP_VERSION='v16';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -306,10 +306,10 @@ async function tablaOSRM(origen,destinos){
 }
 
 /* ---- Voz y sonido ---- */
-function hablar(texto){
+function hablar(texto,encolar=false){
   try{
     if(!('speechSynthesis' in window)) return;
-    speechSynthesis.cancel();
+    if(!encolar) speechSynthesis.cancel();
     const u=new SpeechSynthesisUtterance(texto); u.lang='es-MX'; u.rate=1;
     const v=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('es'));
     if(v) u.voice=v;
@@ -816,7 +816,7 @@ function cerrarPantallaRuta(){ pantallaRuta.classList.add('oculto'); pantallaRut
 
 function reanudarRuta(){ if(R.actual && cliente(R.actual)) iniciarNavegacion(R.actual,true); else mostrarEleccion(); }
 
-async function mostrarEleccion(){
+async function mostrarEleccion(auto=false){
   detenerNavegacion();
   R.actual=null; R.alerta10=false;
   R.pendientes=R.pendientes.filter(id=>cliente(id)); guardarRuta();
@@ -838,6 +838,13 @@ async function mostrarEleccion(){
     }catch(e){ conUb.forEach(c=>info[c.id].seg=estimarSegundos(info[c.id].m)); }
   }
   const top=pos?conUb.slice(0,3):[];
+  // Al terminar con un cliente se sigue solo con el más cercano
+  if(auto && top.length){
+    const sig=top[0];
+    toast(`Siguiente: ${sig.nombre}${info[sig.id]?' · '+textoDist(info[sig.id].m):''}`,3500);
+    hablar(`Siguiente cliente: ${sig.nombre}`,true);
+    return iniciarNavegacion(sig.id);
+  }
   const cobrado=R.cobros.reduce((s,c)=>s+c.monto,0);
   const tarjeta=(c,primera)=>`<button class="opcion ${primera?'primera':''}" data-ir="${c.id}">${miniatura(c)}
       <div class="datos">${primera?'<span class="chip oro">El más cercano</span>':''}<b>${esc(c.nombre)}</b>
@@ -900,21 +907,23 @@ function iniciarNavegacion(id,reanudando=false){
         <button class="btn verde" id="nLlegue">Ya llegué</button>
       </div>
       <div class="fila" style="margin-top:8px">
+        <button class="btn borde" id="nCambiar" style="min-height:40px">🔀 Cambiar de cliente</button>
         <button class="btn claro" id="nCorregir" style="min-height:40px">📍 Corregir ubicación</button>
-        <button class="btn claro" id="nTerminar" style="min-height:40px">Terminar ruta</button>
       </div>
     </div>`);
   $('#nVolver').onclick=async()=>{
     const op=await dialogo({titulo:'Ruta en curso',botones:[
       {txt:'➕ Agregar otro cliente a la ruta',clase:'oro',valor:'agregar'},
       {txt:'🔀 Cambiar de cliente (este sigue pendiente)',clase:'claro',valor:'cambiar'},
+      {txt:'Terminar ruta',clase:'rojo',valor:'terminar'},
       {txt:'Cancelar',clase:'claro',valor:null}]});
     if(op==='agregar') agregarEnRuta(()=>{ const p=$('.pildora'); if(p) p.innerHTML=`Cobrado: <b>${fmt(R.cobros.reduce((s,x)=>s+x.monto,0))}</b> · Faltan ${R.pendientes.length}`; });
     if(op==='cambiar') mostrarEleccion();
+    if(op==='terminar') terminarRutaManual();
   };
   $('#nCancelar').onclick=async()=>{ const m=await pedirMotivo(c.nombre); if(m) cancelarCobro(c,m); };
   $('#nLlegue').onclick=()=>llegada(c,true);
-  $('#nTerminar').onclick=terminarRutaManual;
+  $('#nCambiar').onclick=()=>mostrarEleccion();
   $('#nCorregir').onclick=()=>corregirUbicacion(c);
   $('#bannerX').onclick=()=>$('#banner').classList.add('oculto');
 
@@ -1255,7 +1264,7 @@ async function registrarCobro(c,monto){
   hablar(`Cobro de ${Math.round(monto)} pesos registrado.`);
   recordarPago(c,monto);
   await enviarWhats(await pos,c,String(monto%1?monto.toFixed(2):monto));
-  mostrarEleccion();
+  mostrarEleccion(true);
 }
 async function cancelarCobro(c,motivo){
   const pos=posicionReporte();
@@ -1263,7 +1272,7 @@ async function cancelarCobro(c,motivo){
   R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta();
   toast('Cobro cancelado');
   await enviarWhats(await pos,c,motivo);
-  mostrarEleccion();
+  mostrarEleccion(true);
 }
 
 /* ---- Agregar clientes a una ruta ya iniciada ---- */
