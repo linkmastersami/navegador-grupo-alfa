@@ -200,7 +200,11 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
       <button class="btn borde ancho" id="btnFoto" style="margin-bottom:12px">📷 Agregar desde foto de la lista</button>
       <input type="file" id="fotoLista" accept="image/*" class="oculto">
       <div class="lista" id="listaRuta"></div>
-      <div style="margin-top:16px" class="fila">
+      <label class="tarjeta" style="display:flex;gap:10px;align-items:center;margin-top:14px;padding:12px">
+        <input type="checkbox" id="chkWhats" style="width:22px;height:22px;flex:none">
+        <span style="font-size:14px"><b>📲 Mandar cada visita por WhatsApp</b><br><span style="color:var(--suave)">Al registrar un pago o un motivo se abre WhatsApp con tu ubicación, el nombre y el pago o motivo. Tú eliges el grupo y envías.</span></span>
+      </label>
+      <div style="margin-top:12px" class="fila">
         <button class="btn claro" id="btnVaciar">Vaciar lista</button>
         <button class="btn oro" id="btnIniciar">Iniciar ruta</button>
       </div>
@@ -243,7 +247,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v14';
+const APP_VERSION='v15';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -793,6 +797,8 @@ function mostrarResultadosFoto(h,res){
   };
   pintar();
 }
+$('#chkWhats').checked=whatsActivo();
+$('#chkWhats').onchange=e=>{ try{ localStorage.setItem('ga_whats',e.target.checked?'1':'0'); }catch(x){} };
 $('#btnFoto').onclick=()=>$('#fotoLista').click();
 $('#fotoLista').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; if(f) leerFotoLista(f); };
 
@@ -845,12 +851,14 @@ async function mostrarEleccion(){
     ${top.map((c,i)=>tarjeta(c,i===0)).join('')}
     ${resto.length?`<button class="btn borde ancho" id="btnOtro" style="margin:6px 0 10px">${top.length?'Elegir otro cliente':'Ver clientes de la lista'} (${resto.length})</button>
       <div id="listaOtros" class="${top.length?'oculto':''}">${resto.map(c=>tarjeta(c,false)).join('')}</div>`:''}
+    <button class="btn borde ancho" id="btnAgregarRuta" style="margin-top:6px">➕ Agregar otro cliente a la ruta</button>
     <button class="btn rojo ancho" id="btnTerminar" style="margin-top:14px">Terminar ruta</button>
     <button class="btn claro ancho" id="btnMinimizar" style="margin-top:8px">Ocultar (la ruta sigue activa)</button>
   </div>`);
   pantallaRuta.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>iniciarNavegacion(b.dataset.ir));
   const bo=$('#btnOtro'); if(bo) bo.onclick=()=>{ $('#listaOtros').classList.toggle('oculto'); };
   $('#btnTerminar').onclick=terminarRutaManual;
+  $('#btnAgregarRuta').onclick=()=>agregarEnRuta(mostrarEleccion);
   $('#btnMinimizar').onclick=()=>{ cerrarPantallaRuta(); mantenerPantalla(false); irTab('ruta'); };
 }
 
@@ -896,7 +904,14 @@ function iniciarNavegacion(id,reanudando=false){
         <button class="btn claro" id="nTerminar" style="min-height:40px">Terminar ruta</button>
       </div>
     </div>`);
-  $('#nVolver').onclick=async()=>{ if(await confirmar('Cambiar de cliente','¿Dejar este destino y elegir otro cliente de la lista? (seguirá pendiente)','Elegir otro')) mostrarEleccion(); };
+  $('#nVolver').onclick=async()=>{
+    const op=await dialogo({titulo:'Ruta en curso',botones:[
+      {txt:'➕ Agregar otro cliente a la ruta',clase:'oro',valor:'agregar'},
+      {txt:'🔀 Cambiar de cliente (este sigue pendiente)',clase:'claro',valor:'cambiar'},
+      {txt:'Cancelar',clase:'claro',valor:null}]});
+    if(op==='agregar') agregarEnRuta(()=>{ const p=$('.pildora'); if(p) p.innerHTML=`Cobrado: <b>${fmt(R.cobros.reduce((s,x)=>s+x.monto,0))}</b> · Faltan ${R.pendientes.length}`; });
+    if(op==='cambiar') mostrarEleccion();
+  };
   $('#nCancelar').onclick=async()=>{ const m=await pedirMotivo(c.nombre); if(m) cancelarCobro(c,m); };
   $('#nLlegue').onclick=()=>llegada(c,true);
   $('#nTerminar').onclick=terminarRutaManual;
@@ -1197,8 +1212,8 @@ async function llegada(c,manual){
   else { await ofrecerGuardarAqui(c); c=cliente(c.id)||c; }
   const r=await dialogo({
     titulo:'📍 Llegamos al destino', texto:`¿Te pagó <b>${esc(c.nombre)}</b>?`,
-    html:`<label class="campo"><span>Cantidad cobrada</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off"></label>`,
-    alAbrir:v=>setTimeout(()=>v.querySelector('#dMonto').focus(),250),
+    html:`<label class="campo"><span>Cantidad cobrada${c.ultimoPago?' <span class="opcional">(la de su último pago; cámbiala si pagó otra)</span>':''}</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${c.ultimoPago||''}"></label>`,
+    alAbrir:v=>setTimeout(()=>{ const x=v.querySelector('#dMonto'); x.focus(); x.select(); },250),
     botones:[
       {txt:'Sí, registrar cobro',clase:'verde',valor:v=>{ const n=parseFloat(String(v.querySelector('#dMonto').value).replace(/[^0-9.]/g,''));
           if(!(n>0)){ toast('Escribe la cantidad que te pagó'); return undefined; } return {pago:n}; }},
@@ -1210,18 +1225,72 @@ async function llegada(c,manual){
   if(NAV){ NAV.llegado=false; NAV.pausaLlegada=Date.now()+90000; }
 }
 
-function registrarCobro(c,monto){
-  R.cobros.push({id:c.id,nombre:c.nombre,monto:Math.round(monto*100)/100,hora:new Date().toISOString()});
+/* ---- Reporte de cada visita por WhatsApp (mismo formato que pide la oficina) ---- */
+function whatsActivo(){ try{ return localStorage.getItem('ga_whats')!=='0'; }catch(e){ return true; } }
+function posicionReporte(){
+  if(NAV&&NAV.ultimaPos) return Promise.resolve(NAV.ultimaPos);
+  return new Promise(res=>{ if(!navigator.geolocation) return res(null);
+    navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lng:p.coords.longitude}),()=>res(null),{enableHighAccuracy:true,timeout:3000,maximumAge:60000}); });
+}
+async function enviarWhats(pos,c,detalle){
+  if(!whatsActivo()) return;
+  const lineas=[];
+  if(pos) lineas.push(`https://maps.google.com/?q=${pos.lat.toFixed(7)},${pos.lng.toFixed(7)}`);
+  lineas.push(c.nombre, detalle);
+  const texto=lineas.join('\n');
+  try{ if(navigator.share){ await navigator.share({text:texto}); return; } }
+  catch(e){ if(e.name==='AbortError') return; }
+  window.open('https://wa.me/?text='+encodeURIComponent(texto),'_blank');
+}
+async function recordarPago(c,monto){
+  const x=cliente(c.id); if(!x) return;
+  const u={...x,ultimoPago:monto}; await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===u.id)]=u;
+}
+async function registrarCobro(c,monto){
+  monto=Math.round(monto*100)/100;
+  const pos=posicionReporte();
+  R.cobros.push({id:c.id,nombre:c.nombre,monto,hora:new Date().toISOString()});
   R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta(); pintarTotal();
   toast(`Cobro de ${fmt(monto)} registrado`);
   hablar(`Cobro de ${Math.round(monto)} pesos registrado.`);
+  recordarPago(c,monto);
+  await enviarWhats(await pos,c,String(monto%1?monto.toFixed(2):monto));
   mostrarEleccion();
 }
-function cancelarCobro(c,motivo){
+async function cancelarCobro(c,motivo){
+  const pos=posicionReporte();
   R.cancelados.push({id:c.id,nombre:c.nombre,motivo,hora:new Date().toISOString()});
   R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta();
   toast('Cobro cancelado');
+  await enviarWhats(await pos,c,motivo);
   mostrarEleccion();
+}
+
+/* ---- Agregar clientes a una ruta ya iniciada ---- */
+function agregarEnRuta(alTerminar){
+  let agregados=0;
+  dialogo({titulo:'Agregar cliente a la ruta',texto:'Escribe el nombre y tócalo para agregarlo. Puedes agregar varios.',
+    html:`<div class="buscador" style="margin-bottom:8px"><input id="dBusca" type="search" placeholder="Nombre del cliente…" autocomplete="off"></div><div id="dLista" style="max-height:40vh;overflow:auto"></div>`,
+    alAbrir:v=>{
+      const inp=v.querySelector('#dBusca'), lista=v.querySelector('#dLista');
+      const pintar=()=>{
+        const q=norm(inp.value);
+        if(!q){ lista.innerHTML=''; return; }
+        const m=clientes.filter(c=>norm(c.nombre).includes(q)).slice(0,8);
+        lista.innerHTML=m.length?m.map(c=>{ const ya=R.pendientes.includes(c.id)||R.actual===c.id, hecho=R.cobros.some(x=>x.id===c.id)||R.cancelados.some(x=>x.id===c.id);
+          return `<button type="button" class="cliente" data-id="${c.id}" ${ya?'disabled':''} style="margin-bottom:6px">${miniatura(c)}<div class="datos"><b>${esc(c.nombre)}</b><small>${ya?'Ya está en la ruta':(hecho?'Ya lo visitaste hoy':(c.lat!=null?'📍 Con ubicación':'Sin ubicación'))}</small></div></button>`; }).join('')
+          :'<div class="vacio" style="padding:12px">No hay clientes con ese nombre</div>';
+        lista.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>{
+          const id=b.dataset.id;
+          if(!R.lista.includes(id)) R.lista.push(id);
+          if(!R.pendientes.includes(id)) R.pendientes.push(id);
+          guardarRuta(); agregados++; toast(`${cliente(id).nombre} agregado a la ruta`); inp.value=''; pintar(); inp.focus();
+        });
+      };
+      inp.addEventListener('input',pintar); setTimeout(()=>inp.focus(),250);
+    },
+    botones:[{txt:'Listo',clase:'oro',valor:true}]
+  }).then(()=>{ if(agregados&&alTerminar) alTerminar(); });
 }
 
 async function finalizarRuta(){
@@ -1296,7 +1365,7 @@ $('#archivoImportar').onchange=async e=>{
       if(!c||!c.id||!c.nombre) continue;
       const mismo=clientes.find(x=>x.id===c.id) || porNombre.get(norm(c.nombre));
       if(!mismo){ nuevos.push(c); porNombre.set(norm(c.nombre),c); continue; }
-      const CAMPOS=['telefono','referencia','foto','enlace'];
+      const CAMPOS=['telefono','referencia','foto','enlace','ultimoPago'];
       if(mismo.id===c.id && (!mismo.editado || (c.editado && c.editado>mismo.editado))){
         // No lo has corregido en la app: se toma el del archivo, sin perder datos que solo tenías tú
         const u={...c}; CAMPOS.forEach(k=>{ if(!u[k] && mismo[k]) u[k]=mismo[k]; });
