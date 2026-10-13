@@ -247,7 +247,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v17';
+const APP_VERSION='v18';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -1265,9 +1265,20 @@ async function enviarWhats(pos,c,detalle){
   if(pos) lineas.push(`https://maps.google.com/?q=${pos.lat.toFixed(7)},${pos.lng.toFixed(7)}`);
   lineas.push(c.nombre, detalle);
   const texto=lineas.join('\n');
-  try{ if(navigator.share){ await navigator.share({text:texto}); return; } }
+  try{ if(navigator.share){ await navigator.share({text:texto}); await esperarRegreso(); return; } }
   catch(e){ if(e.name==='AbortError') return; }
   window.open('https://wa.me/?text='+encodeURIComponent(texto),'_blank');
+  await esperarRegreso();
+}
+/* Espera a que vuelvas de WhatsApp a la app (si no se salió de la app, sigue de inmediato) */
+function esperarRegreso(){
+  return new Promise(res=>{
+    let listo=false;
+    const fin=()=>{ if(listo) return; listo=true; document.removeEventListener('visibilitychange',ver); setTimeout(res,500); };
+    const ver=()=>{ if(document.visibilityState==='visible') fin(); };
+    // Android tarda un instante en cambiar a WhatsApp: si en 1.5 s la app sigue a la vista, se continúa
+    setTimeout(()=>{ if(document.visibilityState==='visible') fin(); else document.addEventListener('visibilitychange',ver); },1500);
+  });
 }
 async function recordarPago(c,monto){
   const x=cliente(c.id); if(!x) return;
@@ -1279,9 +1290,10 @@ async function registrarCobro(c,monto){
   R.cobros.push({id:c.id,nombre:c.nombre,monto,hora:new Date().toISOString()});
   R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta(); pintarTotal();
   toast(`Cobro de ${fmt(monto)} registrado`);
-  hablar(`Cobro de ${Math.round(monto)} pesos registrado.`);
   recordarPago(c,monto);
+  // Primero WhatsApp; la voz y el siguiente cliente, ya de regreso en la app (para que no se corten)
   await enviarWhats(await pos,c,String(monto%1?monto.toFixed(2):monto));
+  hablar(`Cobro de ${Math.round(monto)} pesos registrado.`);
   mostrarEleccion(true);
 }
 async function cancelarCobro(c,motivo){
@@ -1290,6 +1302,7 @@ async function cancelarCobro(c,motivo){
   R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta();
   toast('Cobro cancelado');
   await enviarWhats(await pos,c,motivo);
+  hablar('Cobro cancelado.');
   mostrarEleccion(true);
 }
 
