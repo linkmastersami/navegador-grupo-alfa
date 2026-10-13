@@ -247,7 +247,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v16';
+const APP_VERSION='v17';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -306,14 +306,32 @@ async function tablaOSRM(origen,destinos){
 }
 
 /* ---- Voz y sonido ---- */
+/* Voz en español: se elige la mejor voz disponible (México, luego EE. UU., luego España, luego cualquier español) */
+let vozES=null;
+function elegirVoz(){
+  if(!('speechSynthesis' in window)) return null;
+  const vs=speechSynthesis.getVoices().filter(v=>v.lang&&/^es([-_]|$)/i.test(v.lang));
+  const pref=['es-mx','es-us','es-419','es-es'];
+  vs.sort((a,b)=>{ const ia=pref.indexOf(a.lang.toLowerCase().replace('_','-')), ib=pref.indexOf(b.lang.toLowerCase().replace('_','-'));
+    return (ia<0?9:ia)-(ib<0?9:ib) || (b.localService?1:0)-(a.localService?1:0); });
+  vozES=vs[0]||null; return vozES;
+}
+if('speechSynthesis' in window){ elegirVoz(); speechSynthesis.addEventListener('voiceschanged',elegirVoz); }
 function hablar(texto,encolar=false){
   try{
     if(!('speechSynthesis' in window)) return;
-    if(!encolar) speechSynthesis.cancel();
-    const u=new SpeechSynthesisUtterance(texto); u.lang='es-MX'; u.rate=1;
-    const v=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('es'));
-    if(v) u.voice=v;
-    speechSynthesis.speak(u);
+    const decir=()=>{
+      if(!encolar) speechSynthesis.cancel();
+      const u=new SpeechSynthesisUtterance(texto);
+      const v=vozES||elegirVoz();
+      if(v){ u.voice=v; u.lang=v.lang; } else u.lang='es-MX';
+      u.rate=1; speechSynthesis.speak(u);
+    };
+    // Si el teléfono aún no carga sus voces, se espera un momento para no hablar en inglés
+    if(!vozES && !speechSynthesis.getVoices().length){
+      let hecho=false; const ya=()=>{ if(hecho) return; hecho=true; decir(); };
+      speechSynthesis.addEventListener('voiceschanged',ya,{once:true}); setTimeout(ya,1200);
+    } else decir();
   }catch(e){}
 }
 function campana(){
