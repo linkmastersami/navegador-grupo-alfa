@@ -39,6 +39,22 @@ Un pequeño servicio en Supabase lo abre y le regresa a la app la ubicación exa
 Listo: al compartir desde Google Maps (o pegar el enlace), la app pone el pin en el lugar compartido.
 Si el servicio no responde, la app sigue funcionando y usa tu GPS como antes.
 
+## Activar la lectura inteligente de la hoja de ruta (una sola vez)
+El botón **📷 Agregar desde foto de la lista** lee la hoja con inteligencia artificial; si no hay
+internet o el servicio no está activo, usa el lector del propio teléfono (menos preciso).
+
+1. Supabase → proyecto **Alfa Brother** → **Edge Functions** → **Deploy a new function** → **Via Editor**.
+2. Nombre: `leer-lista`. Pega todo el contenido de `supabase/leer-lista/index.ts` y toca **Deploy function**.
+3. En la función → **Details**: apaga **Verify JWT** y guarda.
+4. Saca una clave de IA (elige una):
+   - **Claude (recomendado):** platform.claude.com → **API Keys** → **Create Key**. Agrega saldo en **Billing**
+     (cada foto cuesta menos de un centavo de dólar). Los datos no se usan para entrenar.
+   - **Gemini (gratis):** aistudio.google.com → **Get API key**. En el plan gratis Google usa lo que envías para mejorar sus productos.
+5. Supabase → **Edge Functions** → **Secrets** → **Add new secret**:
+   nombre `ANTHROPIC_API_KEY` (o `GEMINI_API_KEY`) y como valor la clave. Guarda.
+
+Listo: al leer una foto, la app dice si la leyó con el lector inteligente o con el del teléfono.
+
 ## Importante
 - Los datos se guardan **en el teléfono**. Usa Historial → **Guardar respaldo** de vez en cuando.
 - Los avisos de "estamos a 10 minutos" y "llegamos" funcionan con la app **abierta en pantalla**
