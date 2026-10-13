@@ -169,6 +169,9 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 .dia.sel{border-color:var(--azul);background:var(--azul);color:#fff}
 .dia.sel small{color:#C9D6E6}
 .dia.hoy:not(.sel){border-color:var(--oro)}
+.dia.descanso{background:#E9ECF1;box-shadow:none}
+.dia.descanso span{background:transparent;font-size:13px}
+.dia.descanso.sel{background:#5E6B7A;border-color:#5E6B7A}
 .agItem{display:flex;gap:10px;align-items:center;background:#fff;border-radius:14px;padding:10px 12px;box-shadow:var(--sombra);margin-bottom:8px}
 .agItem input{width:22px;height:22px;flex:none}
 .agItem .datos{flex:1;min-width:0}
@@ -233,7 +236,10 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 
   <!-- AGENDA -->
   <section id="tab-agenda" class="oculto">
-    <h2>Agenda de cobros</h2>
+    <div class="fila" style="margin-bottom:10px">
+      <h2 style="flex:1;margin:0">Agenda de cobros</h2>
+      <button class="btn claro" id="agDescanso" style="min-height:38px;padding:6px 12px;font-size:14px">💤 Descanso</button>
+    </div>
     <div class="dias" id="agDias"></div>
     <div id="agLista"></div>
   </section>
@@ -278,7 +284,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v20';
+const APP_VERSION='v21';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -786,6 +792,28 @@ const diasDesde=(iso,f)=>Math.round((new Date(fechaISO(f)+'T12:00')-new Date(iso
 /* Pagó en este periodo: pagó hace menos de medio periodo antes de su fecha (o después) */
 function yaPago(c,k,f){ const u=ultimoPagoDe(c); if(!u) return false; const dd=diasDesde(u,f); return dd>=-3 && dd<=Math.round(PERIODO[k.tipo]*0.45); }
 const ACTIVO_DIAS=75;
+/* ---- Días de descanso: esos días te cubre tu compañero ----
+   dow: tu descanso de cada semana (1 = lunes, null = ninguno) · extra: días sueltos que descansas · trabajo: días de descanso que sí trabajas */
+function cargarDescanso(){ try{ return Object.assign({dow:1,extra:[],trabajo:[]},JSON.parse(localStorage.getItem('ga_descanso'))||{}); }catch(e){ return {dow:1,extra:[],trabajo:[]}; } }
+let DESC=cargarDescanso();
+function guardarDescanso(){ const hace=fechaISO(new Date(Date.now()-120*864e5)); DESC.extra=DESC.extra.filter(d=>d>=hace); DESC.trabajo=DESC.trabajo.filter(d=>d>=hace); try{ localStorage.setItem('ga_descanso',JSON.stringify(DESC)); }catch(e){} }
+function esDescanso(f){ const iso=fechaISO(f); if(DESC.trabajo.includes(iso)) return false; if(DESC.extra.includes(iso)) return true; return DESC.dow!=null && f.getDay()===DESC.dow; }
+async function configurarDescanso(){
+  const r=await dialogo({titulo:'💤 Tu día de descanso',texto:'Los clientes que tocan en tu descanso los cubre tu compañero: no se marcan para tu ruta ni salen como atrasados. Si cambias un descanso, abre ese día en la agenda y usa el botón de abajo.',
+    html:`<div class="motivos" id="dDow">${[1,2,3,4,5,6,0].map(i=>`<button type="button" data-v="${i}" class="${DESC.dow===i?'sel':''}">${DIAS_SEM[i]}</button>`).join('')}<button type="button" data-v="" class="${DESC.dow==null?'sel':''}">No descanso fijo</button></div>`,
+    alAbrir:v=>v.querySelectorAll('#dDow button').forEach(b=>b.onclick=()=>{ v.querySelectorAll('#dDow button').forEach(x=>x.classList.toggle('sel',x===b)); }),
+    botones:[{txt:'Guardar',clase:'oro',valor:v=>{ const b=v.querySelector('#dDow .sel'); return b?b.dataset.v:undefined; }},{txt:'Cancelar',clase:'claro',valor:null}]});
+  if(r===null) return;
+  DESC.dow=r===''?null:+r; guardarDescanso(); toast(DESC.dow==null?'Sin descanso fijo':`Descansas los ${DIAS_SEM[DESC.dow]}`); pintarAgenda();
+}
+function cambiarDiaDescanso(iso){
+  const f=new Date(iso+'T12:00'), hoy=esDescanso(f);
+  DESC.extra=DESC.extra.filter(d=>d!==iso); DESC.trabajo=DESC.trabajo.filter(d=>d!==iso);
+  const fijo=DESC.dow!=null && f.getDay()===DESC.dow;
+  if(hoy){ if(fijo) DESC.trabajo.push(iso); }   // descanso → trabajo
+  else { if(!fijo) DESC.extra.push(iso); }      // trabajo → descanso
+  guardarDescanso(); toast(esDescanso(f)?'Marcado como descanso: te cubre tu compañero':'Marcado como día de trabajo'); pintarAgenda();
+}
 let agSel=null;
 let K_CACHE=null;
 const cobroCache=c=>K_CACHE?K_CACHE.get(c.id):cobroDe(c);
@@ -804,7 +832,7 @@ function atrasados(hoy){
   for(const c of clientes){
     const k=cobroCache(c), u=ultimoPagoDe(c); if(!k||!u||k.aprox||diasDesde(u,hoy)>45) continue;
     for(let i=1;i<=10;i++){ const f=new Date(hoy); f.setDate(f.getDate()-i);
-      if(tocaEl(k,f)){ if(!yaPago(c,k,f) && diasDesde(u,f)>0) out.push({c,k,dias:i}); break; } }
+      if(tocaEl(k,f)){ if(!esDescanso(f) && !yaPago(c,k,f) && diasDesde(u,f)>0) out.push({c,k,dias:i}); break; } }
   }
   return out.sort((a,b)=>a.dias-b.dias);
 }
@@ -816,30 +844,31 @@ function pintarAgenda(){
   const cont=$('#agDias'); let html='';
   for(let i=0;i<31;i++){
     const f=new Date(hoy); f.setDate(f.getDate()+i); const iso=fechaISO(f);
-    const n=clientesDelDia(f).filter(x=>!x.pagado&&!x.inactivo).length;
-    html+=`<button class="dia ${iso===agSel?'sel':''} ${i===0?'hoy':''} ${n?'hay':''}" data-f="${iso}"><small>${i===0?'Hoy':DIAS_SEM[f.getDay()].slice(0,3)}</small><b>${f.getDate()}</b><span>${n}</span></button>`;
+    const desc=esDescanso(f), n=desc?0:clientesDelDia(f).filter(x=>!x.pagado&&!x.inactivo).length;
+    html+=`<button class="dia ${iso===agSel?'sel':''} ${i===0?'hoy':''} ${n?'hay':''} ${desc?'descanso':''}" data-f="${iso}"><small>${i===0?'Hoy':DIAS_SEM[f.getDay()].slice(0,3)}</small><b>${f.getDate()}</b><span>${desc?'💤':n}</span></button>`;
   }
   cont.innerHTML=html;
   cont.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{ agSel=b.dataset.f; pintarAgenda(); });
   const selBtn=cont.querySelector('.sel'); if(selBtn) selBtn.scrollIntoView({inline:'center',block:'nearest'});
 
-  const f=new Date(agSel+'T12:00'), esHoy=agSel===fechaISO(hoy);
+  const f=new Date(agSel+'T12:00'), esHoy=agSel===fechaISO(hoy), desc=esDescanso(f);
   const items=clientesDelDia(f), pend=items.filter(x=>!x.pagado);
   const atr=esHoy?atrasados(hoy).filter(x=>!items.some(y=>y.c.id===x.c.id)):[];
   const esperado=pend.filter(x=>!x.inactivo).reduce((s,x)=>s+(x.c.ultimoPago||0),0);
   const fila=(x,extra,sinMarcar)=>{
-    const u=ultimoPagoDe(x.c), marcado=!sinMarcar&&!x.pagado&&!x.inactivo&&!R.lista.includes(x.c.id);
+    const u=ultimoPagoDe(x.c), marcado=!desc&&!sinMarcar&&!x.pagado&&!x.inactivo&&!R.lista.includes(x.c.id);
     const enRuta=R.estado==='activa'?(R.pendientes.includes(x.c.id)||R.actual===x.c.id):R.lista.includes(x.c.id);
     return `<label class="agItem ${x.pagado?'pagado':''}">
       <input type="checkbox" data-ag="${x.c.id}" ${marcado&&!enRuta?'checked':''} ${enRuta?'disabled':''}>
       <div class="datos"><b>${esc(x.c.nombre)}</b><small>${x.c.ultimoPago?fmt(x.c.ultimoPago)+' · ':''}${u?'último pago '+new Date(u+'T12:00').toLocaleDateString('es-MX',{day:'numeric',month:'short'}):'sin pagos'}${x.k.aprox?' · día aprox.':''}${x.c.lat==null?' · ⚠️ sin ubicación':''}</small></div>
-      ${enRuta?'<span class="chip oro">En ruta</span>':x.pagado?'<span class="chip verde">Ya pagó</span>':x.inactivo?'<span class="chip">Sin pagar hace meses</span>':extra||''}
+      ${enRuta?'<span class="chip oro">En ruta</span>':x.pagado?'<span class="chip verde">Ya pagó</span>':desc?'<span class="chip">Compañero</span>':x.inactivo?'<span class="chip">Sin pagar hace meses</span>':extra||''}
       <button class="btn claro" data-ver="${x.c.id}" style="min-height:34px;padding:4px 10px;font-size:13px">Ver</button></label>`;
   };
   const titulo=f.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
   $('#agLista').innerHTML=`
     <div class="tarjeta" style="margin-bottom:12px"><b>${esHoy?'Hoy, '+titulo:titulo.charAt(0).toUpperCase()+titulo.slice(1)}</b>
-      <div style="color:var(--suave);font-size:14px;margin-top:4px">${pend.filter(x=>!x.inactivo).length} por cobrar${esperado?` · ${fmt(esperado)} esperados`:''}${items.length-pend.length?` · ${items.length-pend.length} ya pagaron`:''}</div></div>
+      <div style="color:var(--suave);font-size:14px;margin-top:4px">${desc?`💤 Es tu descanso: estos ${items.length} cliente(s) los cubre tu compañero.`:`${pend.filter(x=>!x.inactivo).length} por cobrar${esperado?` · ${fmt(esperado)} esperados`:''}${items.length-pend.length?` · ${items.length-pend.length} ya pagaron`:''}`}</div>
+      <button class="btn ${desc?'oro':'claro'} ancho" id="agCambiarDia" style="margin-top:10px;min-height:40px;font-size:14px">${desc?'💼 Voy a trabajar este día':'💤 Este día descanso (me cubre mi compañero)'}</button></div>
     ${items.length?items.map(x=>fila(x)).join(''):'<div class="vacio"><div class="icono">📅</div>Ningún cliente tiene este día de cobro.</div>'}
     ${atr.length?`<details style="margin-top:14px"><summary style="font-weight:700;padding:6px 0">Atrasados (${atr.length})</summary><p style="margin:2px 0 8px;color:var(--suave);font-size:13px">Clientes de día fijo que te pagan seguido; su día pasó hace poco y aún no te pagan. Márcalos si quieres pasar con ellos.</p>${atr.map(x=>fila({...x,pagado:false,inactivo:false},`<span class="chip rojo">hace ${x.dias} día${x.dias>1?'s':''}</span>`,true)).join('')}</details>`:''}
     <div class="agBarra"><button class="btn oro ancho" id="agAgregar">Agregar a la ruta</button></div>
@@ -847,6 +876,7 @@ function pintarAgenda(){
   const contar=()=>{ const n=$('#agLista').querySelectorAll('[data-ag]:checked').length; const b=$('#agAgregar'); b.disabled=!n; b.textContent=n?`Agregar ${n} a la ${R.estado==='activa'?'ruta en curso':'lista de cobranza'}`:'Marca los clientes que vas a cobrar'; };
   $('#agLista').querySelectorAll('[data-ag]').forEach(x=>x.onchange=contar); contar();
   $('#agLista').querySelectorAll('[data-ver]').forEach(b=>b.onclick=e=>{ e.preventDefault(); verCliente(b.dataset.ver); });
+  $('#agCambiarDia').onclick=()=>cambiarDiaDescanso(agSel);
   $('#agAgregar').onclick=()=>{
     const ids=[...$('#agLista').querySelectorAll('[data-ag]:checked')].map(x=>x.dataset.ag);
     if(R.estado==='activa'){ ids.forEach(id=>{ if(!R.lista.includes(id)) R.lista.push(id); if(!R.pendientes.includes(id)) R.pendientes.push(id); }); guardarRuta(); toast(`${ids.length} agregado(s) a la ruta en curso`); pintarAgenda(); return; }
@@ -1022,6 +1052,7 @@ function mostrarResultadosFoto(h,res){
 }
 $('#chkWhats').checked=whatsActivo();
 $('#chkWhats').onchange=e=>{ try{ localStorage.setItem('ga_whats',e.target.checked?'1':'0'); }catch(x){} };
+$('#agDescanso').onclick=configurarDescanso;
 $('#btnFoto').onclick=()=>$('#fotoLista').click();
 $('#fotoLista').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; if(f) leerFotoLista(f); };
 
