@@ -114,7 +114,31 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 .monto{font-size:30px!important;font-weight:800;text-align:center}
 
 /* Pantalla de ruta */
-#ruta{position:fixed;inset:0;z-index:30;background:var(--fondo);display:flex;flex-direction:column}
+#ruta{position:fixed;top:0;left:0;right:0;bottom:62px;z-index:30;background:var(--fondo);display:flex;flex-direction:column}
+.rutaTabs{display:flex;gap:6px;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;background:var(--azul);flex:none}
+.rutaTabs button{flex:1;border-radius:10px;padding:9px 4px;background:rgba(255,255,255,.12);color:#fff;font-weight:700;font-size:14px}
+.rutaTabs button.sel{background:var(--oro);color:var(--azul)}
+.rutaVista{flex:1;position:relative;overflow:hidden}
+#rvNav{position:absolute;inset:0;display:flex;flex-direction:column}
+#rvMapa{position:absolute;inset:0}
+#rvOrden{position:absolute;inset:0;overflow:auto;padding:14px 16px 24px;-webkit-overflow-scrolling:touch}
+#rvNav .topNav{top:10px}
+#rvNav #banner{top:64px}
+#rvNav .eleccion{padding-top:14px}
+.pinNum{width:30px;height:30px;border-radius:50%;background:var(--azul);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.pinNum.actual{background:var(--oro);color:var(--azul);width:36px;height:36px;font-size:15px}
+.pinNum.hecho{background:var(--verde)}
+.pinNum.cancel{background:var(--rojo)}
+.mrInfo{position:absolute;left:10px;right:10px;top:10px;z-index:600;display:flex;gap:6px;flex-wrap:wrap}
+.oItem{display:flex;gap:8px;align-items:center;background:#fff;border-radius:14px;padding:8px 10px;box-shadow:var(--sombra);margin-bottom:8px;user-select:none}
+.oItem .asa{flex:none;width:40px;height:44px;display:grid;place-items:center;font-size:20px;color:var(--suave);touch-action:none;cursor:grab;border-radius:10px;background:#F2F4F7}
+.oItem .num{flex:none;width:26px;height:26px;border-radius:50%;background:var(--azul);color:#fff;font-weight:800;font-size:12px;display:grid;place-items:center}
+.oItem .datos{flex:1;min-width:0}
+.oItem .datos b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oItem .datos small{color:var(--suave);font-size:12px}
+.oItem.arrastrando{opacity:.92;box-shadow:0 10px 26px rgba(0,0,0,.25);transform:scale(1.02);position:relative;z-index:5}
+.enCurso{position:relative}
+.enCurso::after{content:'';position:absolute;top:6px;right:calc(50% - 18px);width:9px;height:9px;border-radius:50%;background:var(--verde)}
 #mapaNav{flex:1;background:#DDE3EA}
 .panelNav{background:#fff;border-radius:22px 22px 0 0;box-shadow:0 -6px 20px rgba(0,0,0,.12);padding:14px 16px calc(14px + env(safe-area-inset-bottom));margin-top:-18px;position:relative;z-index:500}
 .destino{display:flex;gap:12px;align-items:center;margin-bottom:12px}
@@ -281,13 +305,24 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 </nav>
 
 <!-- Pantalla de ruta (elección / navegación) -->
-<div id="ruta" class="oculto"></div>
+<div id="ruta" class="oculto">
+  <div class="rutaTabs">
+    <button data-vista="nav" class="sel">🧭 Navegar</button>
+    <button data-vista="mapa">🗺️ Mapa</button>
+    <button data-vista="orden">📋 Orden</button>
+  </div>
+  <div class="rutaVista">
+    <div id="rvNav"></div>
+    <div id="rvMapa" class="oculto"></div>
+    <div id="rvOrden" class="oculto"></div>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v23';
+const APP_VERSION='v24';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -475,7 +510,8 @@ const RUTA_KEY='ga_ruta';
 let R=cargarRuta();
 function rutaVacia(){ return {estado:'armando',lista:[],pendientes:[],actual:null,cobros:[],cancelados:[],inicio:null,alerta10:false}; }
 function cargarRuta(){ try{ return Object.assign(rutaVacia(),JSON.parse(localStorage.getItem(RUTA_KEY))||{}); }catch(e){ return rutaVacia(); } }
-function guardarRuta(){ try{ localStorage.setItem(RUTA_KEY,JSON.stringify(R)); }catch(e){} }
+function guardarRuta(){ try{ localStorage.setItem(RUTA_KEY,JSON.stringify(R)); }catch(e){}
+  const b=document.querySelector('nav.tabs [data-tab=ruta]'); if(b) b.classList.toggle('enCurso',R.estado==='activa'); }
 
 /* ================= Diálogos ================= */
 function dialogo({titulo='',texto='',html='',botones=[{txt:'Aceptar',clase:'',valor:true}],alAbrir}){
@@ -523,8 +559,8 @@ window.addEventListener('popstate',()=>{
   const hojas=document.querySelectorAll('.hoja');
   if(hojas.length){ const h=hojas[hojas.length-1], x=h.querySelector('[data-cerrar]'); if(x) x.click(); else h.remove(); asegurarAtras(); return; }
   if(!pantallaRuta.classList.contains('oculto')){
-    if(NAV) toast('La ruta sigue en curso. Usa ☰ para cambiar de cliente o terminar.',3500);
-    else { cerrarPantallaRuta(); mantenerPantalla(false); irTab('ruta'); }
+    // Mapa u Orden → regresa a Navegar; Navegar → pestaña Clientes (la ruta sigue corriendo)
+    if(vistaRuta!=='nav') cambiarVista('nav'); else irTab('clientes');
     asegurarAtras(); return;
   }
   if(tabActual!=='clientes'){ irTab('clientes'); asegurarAtras(); return; }
@@ -543,6 +579,9 @@ function irTab(t){
   if(t==='ruta') pintarArmado();
   if(t==='historial') pintarHistorial();
   window.scrollTo(0,0);
+  // La ruta en curso vive en la pestaña Ruta: en las demás se oculta, pero la navegación sigue
+  if(t==='ruta' && R.estado==='activa'){ if($('#rvNav').innerHTML.trim()) mostrarPantallaRuta(); else reanudarRuta(); }
+  else ocultarPantallaRuta();
   asegurarAtras();
 }
 function refrescarTab(){ if(tabActual==='clientes') pintarClientes(); else if(tabActual==='ruta') pintarArmado(); else if(tabActual==='agenda') pintarAgenda(); else pintarHistorial(); }
@@ -1081,16 +1120,163 @@ $('#btnFoto').onclick=()=>$('#fotoLista').click();
 $('#fotoLista').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; if(f) leerFotoLista(f); };
 
 $('#btnVaciar').onclick=async()=>{ if(await confirmar('Vaciar lista','¿Quitar a todos los clientes de la lista de cobranza?','Vaciar','rojo')){ R.lista=[]; guardarRuta(); pintarArmado(); } };
-$('#btnIniciar').onclick=()=>{
+$('#btnIniciar').onclick=async()=>{
   if(!R.lista.length) return;
   Object.assign(R,{estado:'activa',pendientes:[...R.lista],actual:null,cobros:[],cancelados:[],inicio:new Date().toISOString(),alerta10:false});
-  guardarRuta(); hablar('Iniciamos la ruta de cobranza'); mostrarEleccion();
+  guardarRuta(); hablar('Iniciamos la ruta de cobranza');
+  abrirPantallaRuta(`<div class="cargando"><div class="giro"></div>Calculando el mejor orden para cobrar…</div>`);
+  let pos=posReciente(); if(!pos){ try{ pos=await obtenerPosicion(12000); }catch(e){} }
+  await optimizarOrden(pos);
+  mostrarEleccion();
 };
 
 /* ================= RUTA EN CURSO ================= */
 const pantallaRuta=$('#ruta');
-function abrirPantallaRuta(html){ pantallaRuta.innerHTML=html; pantallaRuta.classList.remove('oculto'); document.body.style.overflow='hidden'; }
-function cerrarPantallaRuta(){ pantallaRuta.classList.add('oculto'); pantallaRuta.innerHTML=''; document.body.style.overflow=''; }
+let vistaRuta='nav', mapaRuta=null;
+function mostrarPantallaRuta(){
+  if(tabActual!=='ruta') return;          // se ve solo en la pestaña Ruta
+  pantallaRuta.style.bottom=($('nav.tabs').offsetHeight||62)+'px';
+  pantallaRuta.classList.remove('oculto'); document.body.style.overflow='hidden';
+  cambiarVista(vistaRuta);
+}
+function ocultarPantallaRuta(){ pantallaRuta.classList.add('oculto'); document.body.style.overflow=''; }
+/* Pone contenido en la vista Navegar (la navegación, la elección de cliente o los avisos) */
+function abrirPantallaRuta(html){ $('#rvNav').innerHTML=html; vistaRuta='nav'; mostrarPantallaRuta(); }
+function cerrarPantallaRuta(){
+  ocultarPantallaRuta(); $('#rvNav').innerHTML=''; $('#rvOrden').innerHTML='';
+  if(mapaRuta){ try{ mapaRuta.remove(); }catch(e){} mapaRuta=null; } $('#rvMapa').innerHTML=''; vistaRuta='nav';
+}
+function cambiarVista(v){
+  vistaRuta=v;
+  pantallaRuta.querySelectorAll('.rutaTabs button').forEach(b=>b.classList.toggle('sel',b.dataset.vista===v));
+  $('#rvNav').classList.toggle('oculto',v!=='nav'); $('#rvMapa').classList.toggle('oculto',v!=='mapa'); $('#rvOrden').classList.toggle('oculto',v!=='orden');
+  if(v==='nav' && NAV && NAV.map) setTimeout(()=>{ try{ NAV.map.invalidateSize(false); }catch(e){} },60);
+  if(v==='mapa') pintarMapaRuta();
+  if(v==='orden') pintarOrden();
+}
+pantallaRuta.querySelectorAll('.rutaTabs button').forEach(b=>b.onclick=()=>cambiarVista(b.dataset.vista));
+/* Ir con un cliente desde el Mapa o el Orden */
+function irCon(id){ if(id===R.actual && NAV) return cambiarVista('nav'); iniciarNavegacion(id); }
+
+/* ---- Orden óptimo: vecino más cercano + mejora 2-opt (usa tiempos de manejo si hay internet) ---- */
+async function optimizarOrden(pos){
+  const ids=R.pendientes.filter(id=>id!==R.actual && cliente(id));
+  const con=ids.filter(id=>cliente(id).lat!=null), sin=ids.filter(id=>cliente(id).lat==null);
+  if(con.length<2 && !(pos&&con.length)) return false;
+  const pts=[...(pos?[pos]:[]),...con.map(cliente)];
+  const n=pts.length;
+  let M=null;
+  if(n<=90){ try{
+    const j=await pedirJSON(`${OSRM}/table/v1/driving/${pts.map(p=>`${p.lng},${p.lat}`).join(';')}?annotations=duration`,10000);
+    if(j.code==='Ok') M=j.durations;
+  }catch(e){} }
+  const d=(a,b)=>{ const v=M&&M[a]&&M[a][b]; return v!=null?v:estimarSegundos(distancia(pts[a],pts[b])); };
+  // vecino más cercano desde tu posición (o desde el primero de la lista)
+  const libres=new Set([...Array(n).keys()]); let cur=0; libres.delete(0); const camino=[0];
+  while(libres.size){ let mejor=null; for(const k of libres){ if(mejor==null||d(cur,k)<d(cur,mejor)) mejor=k; } camino.push(mejor); libres.delete(mejor); cur=mejor; }
+  const costo=c=>{ let t=0; for(let i=1;i<c.length;i++) t+=d(c[i-1],c[i]); return t; };
+  let mejorC=costo(camino), mejoro=true, vueltas=0;
+  while(mejoro && vueltas++<40){ mejoro=false;
+    for(let i=1;i<camino.length-1;i++) for(let k=i+1;k<camino.length;k++){
+      const cand=[...camino.slice(0,i),...camino.slice(i,k+1).reverse(),...camino.slice(k+1)], cc=costo(cand);
+      if(cc+1<mejorC){ camino.splice(0,camino.length,...cand); mejorC=cc; mejoro=true; } } }
+  const orden=camino.filter(i=>!(pos&&i===0)).map(i=>con[pos?i-1:i]);
+  R.pendientes=[...(R.actual&&R.pendientes.includes(R.actual)?[R.actual]:[]),...orden,...sin]; guardarRuta();
+  return {seg:mejorC};
+}
+
+/* ---- Vista Mapa: todos los clientes de la ruta ---- */
+function pintarMapaRuta(){
+  const el=$('#rvMapa');
+  if(!hayMapa()){ el.innerHTML='<div class="vacio">El mapa necesita internet.</div>'; return; }
+  if(!mapaRuta){
+    el.innerHTML='<div id="mrMapa" style="position:absolute;inset:0"></div><div class="mrInfo" id="mrInfo"></div>';
+    mapaRuta=L.map('mrMapa',{zoomControl:false}); L.control.zoom({position:'bottomright'}).addTo(mapaRuta);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(mapaRuta);
+    mapaRuta._capa=L.layerGroup().addTo(mapaRuta);
+  }
+  const capa=mapaRuta._capa; capa.clearLayers();
+  const pin=(txt,cls)=>L.divIcon({className:'',html:`<div class="pinNum ${cls}">${txt}</div>`,iconSize:cls==='actual'?[36,36]:[30,30],iconAnchor:cls==='actual'?[18,18]:[15,15]});
+  const puntos=[], linea=[];
+  const yo=(NAV&&NAV.ultimaPos)||posReciente(10*60000);
+  if(yo){ L.marker([yo.lat,yo.lng],{icon:iconoYo(),zIndexOffset:900}).addTo(capa); puntos.push([yo.lat,yo.lng]); linea.push([yo.lat,yo.lng]); }
+  const pop=(c,extra,boton)=>{ const div=document.createElement('div'); div.style.minWidth='170px';
+    div.innerHTML=`<b>${esc(c.nombre)}</b><br><small>${extra}</small>`;
+    if(boton){ const b=document.createElement('button'); b.className='btn oro'; b.style.cssText='min-height:36px;margin-top:8px;width:100%;font-size:14px'; b.textContent=c.id===R.actual?'Ver navegación':'Ir con este cliente'; b.onclick=()=>irCon(c.id); div.appendChild(b); }
+    return div; };
+  // ya visitados
+  R.cobros.forEach(x=>{ const c=cliente(x.id); if(c&&c.lat!=null){ L.marker([c.lat,c.lng],{icon:pin('✓','hecho')}).bindPopup(pop(c,`Cobrado ${fmt(x.monto)}`,false)).addTo(capa); puntos.push([c.lat,c.lng]); } });
+  R.cancelados.forEach(x=>{ const c=cliente(x.id); if(c&&c.lat!=null){ L.marker([c.lat,c.lng],{icon:pin('✗','cancel')}).bindPopup(pop(c,esc(x.motivo),false)).addTo(capa); puntos.push([c.lat,c.lng]); } });
+  // pendientes, numerados en el orden de cobro
+  let n=0, sinUb=0;
+  R.pendientes.forEach(id=>{ const c=cliente(id); if(!c) return; n++;
+    if(c.lat==null){ sinUb++; return; }
+    const act=id===R.actual;
+    L.marker([c.lat,c.lng],{icon:pin(act?'$':n,act?'actual':''),zIndexOffset:act?800:500-n}).bindPopup(pop(c,`${act?'En camino · ':`#${n} en tu orden · `}${c.ultimoPago?fmt(c.ultimoPago):''}`,true)).addTo(capa);
+    puntos.push([c.lat,c.lng]); linea.push([c.lat,c.lng]); });
+  if(linea.length>1) L.polyline(linea,{color:'#163B63',weight:3,opacity:.55,dashArray:'6 8'}).addTo(capa);
+  $('#mrInfo').innerHTML=`<span class="pildora">Por visitar: <b>${R.pendientes.length}</b></span><span class="pildora">Cobrado: <b>${fmt(R.cobros.reduce((s,x)=>s+x.monto,0))}</b></span>${sinUb?`<span class="pildora">${sinUb} sin ubicación</span>`:''}`;
+  setTimeout(()=>{ try{ mapaRuta.invalidateSize(false); if(puntos.length) mapaRuta.fitBounds(puntos,{padding:[50,50],maxZoom:16}); else mapaRuta.setView([CENTRO_DEFECTO.lat,CENTRO_DEFECTO.lng],11); }catch(e){} },60);
+}
+
+/* ---- Vista Orden: lista para acomodar arrastrando ---- */
+function pintarOrden(){
+  const el=$('#rvOrden');
+  const yo=(NAV&&NAV.ultimaPos)||posReciente(10*60000);
+  const act=R.actual&&R.pendientes.includes(R.actual)?cliente(R.actual):null;
+  const resto=R.pendientes.filter(id=>id!==R.actual).map(cliente).filter(Boolean);
+  // distancia aproximada del recorrido (en línea recta)
+  let km=0, prev=act&&act.lat!=null?act:(yo||null);
+  resto.forEach(c=>{ if(c.lat!=null){ if(prev) km+=distancia(prev,c)*1.3/1000; prev=c; } });
+  const item=(c,i)=>`<div class="oItem" data-id="${c.id}"><div class="asa" title="Arrastra para mover">☰</div><div class="num">${i}</div>
+    <div class="datos"><b>${esc(c.nombre)}</b><small>${c.ultimoPago?fmt(c.ultimoPago):''}${c.lat==null?' · ⚠️ sin ubicación':(yo?' · a '+textoDist(distancia(yo,c))+' de ti':'')}</small></div>
+    <button class="btn claro" data-ir="${c.id}" style="min-height:36px;padding:6px 12px;font-size:14px">Ir</button></div>`;
+  el.innerHTML=`
+    <div class="fila" style="margin-bottom:8px"><h2 style="flex:1;margin:0">Orden de cobro</h2>
+      <button class="btn oro" id="oOptim" style="min-height:40px;padding:8px 12px;font-size:14px">⚡ Optimizar</button></div>
+    <p style="margin:0 0 12px;color:var(--suave);font-size:13px">Arrastra <b>☰</b> para cambiar el orden. Al terminar con un cliente, la app sigue con el primero de esta lista.${resto.length>1?` Recorrido aprox. ${km.toFixed(1)} km.`:''}</p>
+    ${act?`<div class="tarjeta" style="margin-bottom:10px;border-left:6px solid var(--oro)"><small style="color:var(--suave)">${NAV?'Ahora vas con':'Siguiente'}</small><br><b>${esc(act.nombre)}</b></div>`:''}
+    <div id="oLista">${resto.length?resto.map((c,i)=>item(c,i+1)).join(''):'<div class="vacio" style="padding:16px">No hay más clientes pendientes.</div>'}</div>
+    <button class="btn borde ancho" id="oAgregar" style="margin-top:6px">➕ Agregar otro cliente a la ruta</button>
+    ${R.cobros.length||R.cancelados.length?`<h3>Ya visitados</h3><div class="tarjeta">${R.cobros.map(x=>`<div class="renglon"><div class="izq">✓ ${esc(x.nombre)}</div><div class="der">${fmt(x.monto)}</div></div>`).join('')}${R.cancelados.map(x=>`<div class="renglon"><div class="izq">✗ ${esc(x.nombre)}<small>${esc(x.motivo)}</small></div></div>`).join('')}</div>`:''}`;
+  el.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>irCon(b.dataset.ir));
+  $('#oAgregar').onclick=()=>agregarEnRuta(()=>pintarOrden());
+  $('#oOptim').onclick=async()=>{
+    const b=$('#oOptim'); b.disabled=true; b.textContent='Calculando…';
+    let pos=(NAV&&NAV.ultimaPos)||posReciente(); if(!pos){ try{ pos=await obtenerPosicion(10000); }catch(e){} }
+    const r=await optimizarOrden(pos);
+    toast(r?'Orden optimizado desde donde estás':'Se necesitan al menos 2 clientes con ubicación'); pintarOrden();
+  };
+  hacerArrastrable($('#oLista'),ids=>{
+    R.pendientes=[...(act?[act.id]:[]),...ids]; guardarRuta(); pintarOrden();
+  });
+}
+/* Arrastrar y soltar con el dedo (o el mouse) usando la manija ☰ */
+function hacerArrastrable(lista,alSoltar){
+  if(!lista) return;
+  lista.querySelectorAll('.asa').forEach(asa=>{
+    asa.addEventListener('pointerdown',e=>{
+      e.preventDefault();
+      const item=asa.closest('.oItem'), cont=$('#rvOrden'); item.classList.add('arrastrando');
+      if(navigator.vibrate) navigator.vibrate(15);
+      const yo=e.pointerId;
+      let scrollT=null;
+      const mover=ev=>{
+        if(ev.pointerId!==yo) return; ev.preventDefault();
+        const y=ev.clientY; let antes=null;
+        for(const o of lista.querySelectorAll('.oItem:not(.arrastrando)')){ const r=o.getBoundingClientRect(); if(y<r.top+r.height/2){ antes=o; break; } }
+        if(antes!==item.nextElementSibling || !antes) lista.insertBefore(item,antes);
+        const rc=cont.getBoundingClientRect(); clearInterval(scrollT);
+        if(y<rc.top+50) scrollT=setInterval(()=>cont.scrollTop-=10,16); else if(y>rc.bottom-50) scrollT=setInterval(()=>cont.scrollTop+=10,16);
+      };
+      // Se escucha en toda la ventana: al mover la tarjeta en la lista el teléfono suelta la manija
+      const fin=ev=>{ if(ev.pointerId!==yo) return; clearInterval(scrollT);
+        window.removeEventListener('pointermove',mover); window.removeEventListener('pointerup',fin); window.removeEventListener('pointercancel',fin);
+        item.classList.remove('arrastrando'); alSoltar([...lista.querySelectorAll('.oItem')].map(x=>x.dataset.id)); };
+      window.addEventListener('pointermove',mover,{passive:false}); window.addEventListener('pointerup',fin); window.addEventListener('pointercancel',fin);
+    });
+  });
+}
 
 function reanudarRuta(){
   if(R.actual && cliente(R.actual) && R.pendientes.includes(R.actual)) iniciarNavegacion(R.actual,true);
@@ -1102,6 +1288,13 @@ async function mostrarEleccion(auto=false){
   R.actual=null; R.alerta10=false;
   R.pendientes=R.pendientes.filter(id=>cliente(id)); guardarRuta();
   if(!R.pendientes.length) return finalizarRuta();
+  // Al terminar con un cliente se sigue solo con el siguiente de tu orden
+  if(auto){
+    const sig=cliente(R.pendientes[0]), p=posReciente();
+    toast(`Siguiente: ${sig.nombre}${p&&sig.lat!=null?' · '+textoDist(distancia(p,sig)):''}`,3500);
+    hablar(`Siguiente cliente: ${sig.nombre}`,true);
+    return iniciarNavegacion(sig.id);
+  }
   abrirPantallaRuta(`<div class="cargando"><div class="giro"></div>Buscando los clientes más cercanos…</div>`);
   mantenerPantalla(true);
   let pos=null, errorGPS='';
@@ -1121,20 +1314,15 @@ async function mostrarEleccion(auto=false){
     conUb.forEach(c=>{ if(info[c.id].seg==null) info[c.id].seg=estimarSegundos(info[c.id].m); });
     cand.sort((a,b)=>info[a.id].seg-info[b.id].seg); conUb.splice(0,cand.length,...cand);
   }
-  const top=pos?conUb.slice(0,3):[];
-  // Al terminar con un cliente se sigue solo con el más cercano
-  if(auto && top.length){
-    const sig=top[0];
-    toast(`Siguiente: ${sig.nombre}${info[sig.id]?' · '+textoDist(info[sig.id].m):''}`,3500);
-    hablar(`Siguiente cliente: ${sig.nombre}`,true);
-    return iniciarNavegacion(sig.id);
-  }
+  // Primero el siguiente de tu orden, luego los más cercanos
+  const sig=cliente(R.pendientes[0]);
+  const top=[sig,...(pos?conUb.filter(c=>c!==sig).slice(0,2):[])];
   const cobrado=R.cobros.reduce((s,c)=>s+c.monto,0);
   const tarjeta=(c,primera)=>`<button class="opcion ${primera?'primera':''}" data-ir="${c.id}">${miniatura(c)}
-      <div class="datos">${primera?'<span class="chip oro">El más cercano</span>':''}<b>${esc(c.nombre)}</b>
+      <div class="datos">${primera?'<span class="chip oro">Siguiente en tu orden</span>':''}<b>${esc(c.nombre)}</b>
       <small>${info[c.id]?`${textoDist(info[c.id].m)} · aprox. ${textoMin(info[c.id].seg)}`:(c.lat==null?'Sin ubicación registrada':'')}</small></div>
       <span class="ir">Ir</span></button>`;
-  const resto=[...conUb.filter(c=>!top.includes(c)),...sinUb];
+  const resto=R.pendientes.map(cliente).filter(c=>c&&!top.includes(c));
   abrirPantallaRuta(`<div class="eleccion">
     <div class="fila" style="margin-bottom:6px"><span class="pildora">Por visitar: <b>${R.pendientes.length}</b></span><span class="pildora">Cobrado: <b>${fmt(cobrado)}</b></span></div>
     <h2 style="margin-top:14px">${R.cobros.length||R.cancelados.length?'¿Con quién sigues?':'¿Con quién quieres empezar?'}</h2>
@@ -1144,13 +1332,11 @@ async function mostrarEleccion(auto=false){
       <div id="listaOtros" class="${top.length?'oculto':''}">${resto.map(c=>tarjeta(c,false)).join('')}</div>`:''}
     <button class="btn borde ancho" id="btnAgregarRuta" style="margin-top:6px">➕ Agregar otro cliente a la ruta</button>
     <button class="btn rojo ancho" id="btnTerminar" style="margin-top:14px">Terminar ruta</button>
-    <button class="btn claro ancho" id="btnMinimizar" style="margin-top:8px">Ocultar (la ruta sigue activa)</button>
   </div>`);
   pantallaRuta.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>iniciarNavegacion(b.dataset.ir));
   const bo=$('#btnOtro'); if(bo) bo.onclick=()=>{ $('#listaOtros').classList.toggle('oculto'); };
   $('#btnTerminar').onclick=terminarRutaManual;
   $('#btnAgregarRuta').onclick=()=>agregarEnRuta(mostrarEleccion);
-  $('#btnMinimizar').onclick=()=>{ cerrarPantallaRuta(); mantenerPantalla(false); irTab('ruta'); };
 }
 
 async function terminarRutaManual(){
@@ -1166,7 +1352,7 @@ function iconoDest(){ return L.divIcon({className:'',html:'<div class="marcadorD
 function iniciarNavegacion(id,reanudando=false){
   const c=cliente(id); if(!c) return mostrarEleccion();
   if(!reanudando) R.alerta10=false;
-  R.actual=id; guardarRuta();
+  R.actual=id; R.pendientes=[id,...R.pendientes.filter(x=>x!==id)]; guardarRuta();
   detenerNavegacion();
   mantenerPantalla(true);
   const sinUb=c.lat==null;
@@ -1202,12 +1388,12 @@ function iniciarNavegacion(id,reanudando=false){
       {txt:'Terminar ruta',clase:'rojo',valor:'terminar'},
       {txt:'Cancelar',clase:'claro',valor:null}]});
     if(op==='agregar') agregarEnRuta(()=>{ const p=$('.pildora'); if(p) p.innerHTML=`Cobrado: <b>${fmt(R.cobros.reduce((s,x)=>s+x.monto,0))}</b> · Faltan ${R.pendientes.length}`; });
-    if(op==='cambiar') mostrarEleccion();
+    if(op==='cambiar') cambiarVista('orden');
     if(op==='terminar') terminarRutaManual();
   };
   $('#nCancelar').onclick=async()=>{ const m=await pedirMotivo(c.nombre); if(m) cancelarCobro(c,m); };
   $('#nLlegue').onclick=()=>llegada(c,true);
-  $('#nCambiar').onclick=()=>mostrarEleccion();
+  $('#nCambiar').onclick=()=>cambiarVista('orden');
   $('#nCorregir').onclick=()=>corregirUbicacion(c);
   $('#bannerX').onclick=()=>$('#banner').classList.add('oculto');
 
@@ -1779,7 +1965,8 @@ $('#cerrarTip').onclick=e=>{ e.preventDefault(); $('#tipCompartir').classList.ad
   if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
   await revisarCompartido();
   asegurarAtras();
-  if(R.estado==='activa' && !document.querySelector('.hoja')){ irTab('ruta'); reanudarRuta(); }
+  guardarRuta();   // marca la pestaña Ruta si hay una ruta en curso
+  if(R.estado==='activa' && !document.querySelector('.hoja')) irTab('ruta');   // irTab reanuda la ruta
 })();
 </script>
 </body>
