@@ -243,7 +243,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v12';
+const APP_VERSION='v13';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -707,58 +707,26 @@ function buscarEnFoto(lineas){
   }
   return res;
 }
-/* Lectura con inteligencia artificial (servicio "leer-lista" en Supabase). Si falla, se usa el lector del teléfono. */
-const LEER_URL='https://unprmjtvxyxyzbblynmd.supabase.co/functions/v1/leer-lista';
-async function leerConIA(file){
-  if(!navigator.onLine) throw new Error('sin internet');
-  const dataUrl=await comprimirFoto(file,1600,0.85);
-  const ctl=new AbortController(), t=setTimeout(()=>ctl.abort(),35000);
-  try{
-    const r=await fetch(LEER_URL,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({imagen:dataUrl.split(',')[1],tipo:'image/jpeg'}),signal:ctl.signal});
-    const d=await r.json().catch(()=>({}));
-    if(!r.ok||!Array.isArray(d.nombres)) throw new Error(d.error||('error '+r.status));
-    return d.nombres;
-  }finally{ clearTimeout(t); }
-}
-async function leerConTesseract(file,estado){
-  const lienzo=await prepararFoto(file);
-  estado('Preparando el lector del teléfono (la primera vez tarda un poco más)…');
-  await cargarTesseract();
-  let paso='';
-  const worker=await Tesseract.createWorker('spa',1,{workerPath:TESS+'worker.min.js',corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
-    langPath:'https://cdn.jsdelivr.net/npm/@tesseract.js-data/spa@1.0.0/4.0.0_best_int',
-    logger:m=>{ if(m.status==='recognizing text') estado(`Leyendo la foto${paso}… ${Math.round(m.progress*100)}%`); }});
-  try{
-    // Varias lecturas con distintos modos; se juntan los clientes encontrados en cualquiera de ellas
-    let res=null; const encontrados=new Set();
-    const modos=['11','6','4'];
-    for(let k=0;k<modos.length;k++){
-      paso=k?` (revisión ${k+1} de ${modos.length})`:'';
-      await worker.setParameters({tessedit_pageseg_mode:modos[k]});
-      const {data}=await worker.recognize(lienzo);
-      const r=buscarEnFoto(data.text.split('\n'));
-      if(!res){ res=r; r.forEach(x=>{ if(x.cands[0]&&x.cands[0].p>=0.6) encontrados.add(x.cands[0].c.id); }); continue; }
-      r.forEach(x=>{ const c=x.cands[0]; if(c&&c.p>=0.6&&!encontrados.has(c.c.id)){ res.push(x); encontrados.add(c.c.id); } });
-    }
-    return res;
-  }finally{ worker.terminate(); }
-}
 async function leerFotoLista(file){
-  const h=abrirHoja('Lista desde foto',`<div class="cargando" id="fCarga"><div class="giro"></div><div id="fEstado">Leyendo la hoja…</div></div><div id="fRes"></div>`);
+  const h=abrirHoja('Lista desde foto',`<div class="cargando" id="fCarga"><div class="giro"></div><div id="fEstado">Preparando la foto…</div></div><div id="fRes"></div>`);
   const estado=t=>{ const e=h.querySelector('#fEstado'); if(e) e.textContent=t; };
+  let worker=null;
   try{
-    let res=null, modo='ia';
-    try{
-      estado('Leyendo la hoja con inteligencia artificial…');
-      const nombres=await leerConIA(file);
-      if(nombres.length) res=buscarEnFoto(nombres);
-    }catch(e){ console.warn('Lectura con IA no disponible:',e.message); }
-    if(!res||!res.length){ modo='tel'; res=await leerConTesseract(file,estado); }
-    res.modo=modo;
+    const lienzo=await prepararFoto(file);
+    estado('Preparando el lector (la primera vez tarda un poco más)…');
+    await cargarTesseract();
+    worker=await Tesseract.createWorker('spa',1,{workerPath:TESS+'worker.min.js',corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
+      langPath:'https://cdn.jsdelivr.net/npm/@tesseract.js-data/spa@1.0.0/4.0.0_best_int',
+      logger:m=>{ if(m.status==='recognizing text') estado(`Leyendo la foto… ${Math.round(m.progress*100)}%`); }});
+    await worker.setParameters({tessedit_pageseg_mode:'11'});
+    const {data}=await worker.recognize(lienzo);
+    let lineas=data.text.split('\n');
+    let res=buscarEnFoto(lineas);
+    if(!res.some(r=>r.cands.length)){ await worker.setParameters({tessedit_pageseg_mode:'6'}); const r2=await worker.recognize(lienzo); res=buscarEnFoto(r2.data.text.split('\n')); }
     mostrarResultadosFoto(h,res);
   }catch(e){
     h.querySelector('#fCarga').innerHTML=`<div class="vacio"><div class="icono">⚠️</div>${esc(e.message||'No se pudo leer la foto')}</div>`;
-  }
+  }finally{ if(worker) worker.terminate(); }
 }
 const MINUS=new Set(['de','del','la','las','los','y']);
 const titulo=t=>t.toLowerCase().split(' ').filter(Boolean).map((w,i)=>i&&MINUS.has(w)?w:w[0].toUpperCase()+w.slice(1)).join(' ');
@@ -777,7 +745,7 @@ function mostrarResultadosFoto(h,res){
   const pintar=()=>{
     const n=Object.values(sel).filter(id=>id&&!R.lista.includes(id)).length;
     const conCliente=filas.filter(r=>r.cands.length).length;
-    cont.innerHTML=`${res.modo==='tel'?'<div class="aviso">Se leyó con el lector del teléfono (sin conexión con el lector inteligente). Revisa con calma.</div>':''}<p style="margin:0 0 12px;color:var(--suave)">Leí <b>${filas.length}</b> nombre(s)${conCliente<filas.length?` · ${filas.length-conCliente} no están en tus clientes`:''}. Revisa cada uno:</p>
+    cont.innerHTML=`<p style="margin:0 0 12px;color:var(--suave)">Leí <b>${filas.length}</b> nombre(s)${conCliente<filas.length?` · ${filas.length-conCliente} no están en tus clientes`:''}. Revisa cada uno:</p>
       ${filas.map((r,i)=>{
         const elegido=sel[i]&&cliente(sel[i]);
         const elegidoC=sel[i]&&r.cands.find(x=>x.c.id===sel[i]);
