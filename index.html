@@ -243,7 +243,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v13';
+const APP_VERSION='v14';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -423,17 +423,19 @@ function dialogo({titulo='',texto='',html='',botones=[{txt:'Aceptar',clase:'',va
 }
 const confirmar=(titulo,texto,si='Sí',clase='')=>dialogo({titulo,texto,botones:[{txt:si,clase:clase||'',valor:true},{txt:'Cancelar',clase:'claro',valor:false}]});
 
-const MOTIVOS=['No estaba en casa','No tenía dinero','Pidió otra fecha','No encontré el domicilio','Ya había pagado','Se negó a pagar'];
+const MOTIVOS=['No hay nadie','No está y no dejó su pago','Reagendó para: ','No hay paso a su domicilio','Para mañana','Que pase más tarde'];
 function pedirMotivo(nombre){
   return dialogo({
     titulo:'Cancelar cobro', texto:`¿Por qué se cancela el cobro de <b>${esc(nombre)}</b>?`,
-    html:`<div class="motivos">${MOTIVOS.map(m=>`<button type="button">${m}</button>`).join('')}</div>
+    html:`<div class="motivos">${MOTIVOS.map(m=>`<button type="button" data-m="${m}">${m.trim()}</button>`).join('')}</div>
           <label class="campo"><span>Motivo u observaciones</span><textarea id="txtMotivo" rows="2" placeholder="Escribe el motivo…"></textarea></label>`,
     alAbrir:v=>{ v.querySelectorAll('.motivos button').forEach(b=>b.onclick=()=>{
         v.querySelectorAll('.motivos button').forEach(x=>x.classList.remove('sel')); b.classList.add('sel');
-        v.querySelector('#txtMotivo').value=b.textContent; }); },
+        const t=v.querySelector('#txtMotivo'); t.value=b.dataset.m;
+        // "Reagendó para:" deja el cursor al final para escribir la fecha
+        if(b.dataset.m.endsWith(': ')){ t.focus(); t.setSelectionRange(t.value.length,t.value.length); } }); },
     botones:[
-      {txt:'Cancelar cobro',clase:'rojo',valor:v=>{ const m=v.querySelector('#txtMotivo').value.trim(); if(!m){ toast('Escribe o elige un motivo'); return undefined; } return m; }},
+      {txt:'Cancelar cobro',clase:'rojo',valor:v=>{ const m=v.querySelector('#txtMotivo').value.trim(); if(!m){ toast('Escribe o elige un motivo'); return undefined; } if(/:$/.test(m)){ toast('Escribe para cuándo se reagendó'); const t=v.querySelector('#txtMotivo'); t.focus(); t.setSelectionRange(t.value.length,t.value.length); return undefined; } return m; }},
       {txt:'Regresar',clase:'claro',valor:null}
     ]});
 }
