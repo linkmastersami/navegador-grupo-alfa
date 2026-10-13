@@ -158,6 +158,24 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 .marcadorDest span{transform:rotate(45deg);font-weight:800;color:var(--azul);font-size:14px}
 .leaflet-container{font:inherit}
 .alerta-tab{position:relative}
+/* Agenda */
+.dias{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 10px;margin:0 -16px 6px;padding-left:16px;padding-right:16px;scrollbar-width:none}
+.dias::-webkit-scrollbar{display:none}
+.dia{flex:none;width:58px;border-radius:14px;background:#fff;box-shadow:var(--sombra);padding:8px 4px;text-align:center;color:var(--texto);border:2px solid transparent}
+.dia small{display:block;font-size:11px;color:var(--suave);text-transform:capitalize}
+.dia b{display:block;font-size:20px;line-height:1.2}
+.dia span{display:inline-block;min-width:22px;font-size:11px;font-weight:700;border-radius:999px;padding:1px 6px;background:#EEF1F5;color:var(--suave)}
+.dia.hay span{background:#FDF0D3;color:#7A520C}
+.dia.sel{border-color:var(--azul);background:var(--azul);color:#fff}
+.dia.sel small{color:#C9D6E6}
+.dia.hoy:not(.sel){border-color:var(--oro)}
+.agItem{display:flex;gap:10px;align-items:center;background:#fff;border-radius:14px;padding:10px 12px;box-shadow:var(--sombra);margin-bottom:8px}
+.agItem input{width:22px;height:22px;flex:none}
+.agItem .datos{flex:1;min-width:0}
+.agItem .datos b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--texto)}
+.agItem .datos small{color:var(--suave);font-size:13px}
+.agItem.pagado{opacity:.6}
+.agBarra{position:sticky;bottom:calc(76px + env(safe-area-inset-bottom));margin-top:12px}
 .alerta-tab::after{content:'';position:absolute;top:6px;right:calc(50% - 18px);width:9px;height:9px;border-radius:50%;background:var(--rojo)}
 .toast{pointer-events:none;position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#14202E;color:#fff;padding:11px 16px;border-radius:12px;z-index:90;font-size:14px;max-width:90vw;text-align:center}
 </style>
@@ -213,6 +231,13 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
     </div>
   </section>
 
+  <!-- AGENDA -->
+  <section id="tab-agenda" class="oculto">
+    <h2>Agenda de cobros</h2>
+    <div class="dias" id="agDias"></div>
+    <div id="agLista"></div>
+  </section>
+
   <!-- HISTORIAL -->
   <section id="tab-historial" class="oculto">
     <h2>Historial</h2>
@@ -238,8 +263,11 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
   <button data-tab="ruta">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H16a3.5 3.5 0 0 0 0-7H8a3.5 3.5 0 0 1 0-7h7.5"/></svg>
     Ruta</button>
+  <button data-tab="agenda">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14l2.5 2.5L16 13"/></svg>
+    Agenda</button>
   <button data-tab="historial">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14h5"/></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
     Historial</button>
 </nav>
 
@@ -250,7 +278,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v19';
+const APP_VERSION='v20';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -496,14 +524,15 @@ let tabActual='clientes';
 function irTab(t){
   tabActual=t;
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('activa',b.dataset.tab===t));
-  ['clientes','ruta','historial'].forEach(x=>$('#tab-'+x).classList.toggle('oculto',x!==t));
+  ['clientes','ruta','agenda','historial'].forEach(x=>$('#tab-'+x).classList.toggle('oculto',x!==t));
+  if(t==='agenda') pintarAgenda();
   if(t==='clientes') pintarClientes();
   if(t==='ruta') pintarArmado();
   if(t==='historial') pintarHistorial();
   window.scrollTo(0,0);
   asegurarAtras();
 }
-function refrescarTab(){ if(tabActual==='clientes') pintarClientes(); else if(tabActual==='ruta') pintarArmado(); else pintarHistorial(); }
+function refrescarTab(){ if(tabActual==='clientes') pintarClientes(); else if(tabActual==='ruta') pintarArmado(); else if(tabActual==='agenda') pintarAgenda(); else pintarHistorial(); }
 document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>irTab(b.dataset.tab));
 
 function totalHoy(){
@@ -645,6 +674,7 @@ function verCliente(id){
       ${c.referencia?`<div class="renglon"><div class="izq"><small>Referencias</small>${esc(c.referencia)}</div></div>`:''}
       ${c.origen&&c.origen.startsWith('Oficina')?`<div class="renglon"><div class="izq"><small>Origen</small>Ubicación enviada por la ${esc(c.origen.toLowerCase())}</div></div>`:''}
       ${c.visitas?`<div class="renglon"><div class="izq"><small>Historial (importado de WhatsApp)</small>${c.visitas} visita(s) · última: ${new Date(c.ultimaVisita+'T12:00').toLocaleDateString('es-MX')}</div></div>`:''}
+      <div class="renglon"><div class="izq"><small>Día de cobro</small>${textoCobro(cobroDe(c))}</div><button class="btn claro" id="vCobro" style="min-height:36px;padding:6px 12px;font-size:14px">Cambiar</button></div>
       <div class="renglon"><div class="izq"><small>Ubicación</small>${c.lat!=null?`${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`:'Sin ubicación'}</div></div>
     </div>
     ${c.lat!=null?'<div class="mapaForm" id="vMapa" style="margin-bottom:12px"></div>':''}
@@ -656,6 +686,7 @@ function verCliente(id){
   if(c.lat!=null) mapaChico(h.querySelector('#vMapa'),{lat:c.lat,lng:c.lng},false);
   h.querySelector('#vRuta').onclick=()=>{ if(!enRuta){ agregarARuta(c.id); } h.remove(); irTab('ruta'); };
   h.querySelector('#vEditar').onclick=()=>{ h.remove(); formCliente(c); };
+  h.querySelector('#vCobro').onclick=async()=>{ if(await cambiarCobro(c)){ h.remove(); verCliente(c.id); } };
   h.querySelector('#vBorrar').onclick=async()=>{
     if(!(await confirmar('Eliminar cliente',`¿Seguro que quieres eliminar a <b>${esc(c.nombre)}</b>? Esto no se puede deshacer.`,'Eliminar','rojo'))) return;
     await DB.borrar('clientes',c.id);
@@ -713,6 +744,141 @@ function pintarSugerencias(){
 $('#agregarRuta').addEventListener('input',pintarSugerencias);
 $('#agregarRuta').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const b=$('#sugerencias button[data-id]:not([disabled])'); if(b) b.click(); } });
 document.addEventListener('click',e=>{ if(!e.target.closest('.buscador')) $('#sugerencias').classList.add('oculto'); });
+/* ================= AGENDA =================
+   Cada cliente tiene un "día de cobro" calculado con las fechas en que te pagó (o puesto a mano). */
+const fechaISO=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const DIAS_SEM=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+const mediana=a=>{ const b=[...a].sort((x,y)=>x-y), m=b.length>>1; return b.length?(b.length%2?b[m]:(b[m-1]+b[m])/2):0; };
+function diaCircular(ds,N){   // el día que queda "en medio" (31 y 1 están juntos); pesan más los pagos recientes
+  let mejor=null;
+  for(let c=1;c<=N;c++){ let costo=0; ds.forEach((x,i)=>{ const d=Math.abs(x-c); costo+=Math.min(d,N-d)*(1+i*0.15); }); if(!mejor||costo<mejor[0]) mejor=[costo,c]; }
+  return mejor?mejor[1]:1;
+}
+function calcularCobro(pagos){
+  const ds=[...new Set(pagos||[])].sort().slice(-12).map(s=>new Date(s+'T12:00'));
+  if(!ds.length) return null;
+  const iv=[]; for(let i=1;i<ds.length;i++){ const d=Math.round((ds[i]-ds[i-1])/864e5); if(d>2) iv.push(d); }
+  const med=iv.length?mediana(iv):30;
+  if(iv.length>=3 && med<=10){ const cnt={}; ds.forEach(d=>cnt[d.getDay()]=(cnt[d.getDay()]||0)+1); return {tipo:'semanal',dow:+Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0],aprox:true}; }
+  if(iv.length>=3 && med<=20){ const b=diaCircular(ds.map(d=>(d.getDate()-1)%15+1),15); return {tipo:'quincenal',dias:[b,b+15],aprox:true}; }
+  const dia=diaCircular(ds.map(d=>d.getDate()),31);
+  const desv=mediana(ds.map(d=>{ const x=Math.abs(d.getDate()-dia); return Math.min(x,31-x); }));
+  return {tipo:'mensual',dia,aprox:ds.length<3||desv>3};
+}
+const cobroDe=c=>(c.cobro&&c.cobro.manual)?c.cobro:calcularCobro(c.pagos);
+function textoCobro(k){
+  if(!k||k.tipo==='ninguno') return 'Sin día de cobro';
+  const a=k.aprox?' (aprox.)':'';
+  if(k.tipo==='semanal') return `Cada ${DIAS_SEM[k.dow]}${a}`;
+  if(k.tipo==='quincenal') return `Días ${k.dias[0]} y ${k.dias[1]} de cada mes${a}`;
+  return `Día ${k.dia} de cada mes${a}`;
+}
+function tocaEl(k,f){   // ¿le toca pagar en la fecha f?
+  if(!k||k.tipo==='ninguno') return false;
+  const ult=new Date(f.getFullYear(),f.getMonth()+1,0).getDate(), d=f.getDate(), en=x=>Math.min(x,ult)===d;
+  if(k.tipo==='semanal') return f.getDay()===k.dow;
+  if(k.tipo==='quincenal') return k.dias.some(en);
+  return en(k.dia);
+}
+const PERIODO={semanal:7,quincenal:15,mensual:30};
+const ultimoPagoDe=c=>(c.pagos&&c.pagos.length)?c.pagos[c.pagos.length-1]:null;
+const diasDesde=(iso,f)=>Math.round((new Date(fechaISO(f)+'T12:00')-new Date(iso+'T12:00'))/864e5);
+/* Pagó en este periodo: pagó hace menos de medio periodo antes de su fecha (o después) */
+function yaPago(c,k,f){ const u=ultimoPagoDe(c); if(!u) return false; const dd=diasDesde(u,f); return dd>=-3 && dd<=Math.round(PERIODO[k.tipo]*0.45); }
+const ACTIVO_DIAS=75;
+let agSel=null;
+let K_CACHE=null;
+const cobroCache=c=>K_CACHE?K_CACHE.get(c.id):cobroDe(c);
+function clientesDelDia(f){
+  const out=[];
+  for(const c of clientes){
+    const k=cobroCache(c); if(!k||!tocaEl(k,f)) continue;
+    const u=ultimoPagoDe(c); if(!(c.cobro&&c.cobro.manual) && (!u || diasDesde(u,new Date())>365)) continue;
+    out.push({c,k,pagado:yaPago(c,k,f),inactivo:!(c.cobro&&c.cobro.manual) && diasDesde(u,new Date())>ACTIVO_DIAS});
+  }
+  return out.sort((a,b)=>a.pagado-b.pagado||a.inactivo-b.inactivo||a.c.nombre.localeCompare(b.c.nombre,'es'));
+}
+/* Atrasados: activos cuya fecha ya pasó (hasta 20 días) y no han pagado desde entonces */
+function atrasados(hoy){
+  const out=[];
+  for(const c of clientes){
+    const k=cobroCache(c), u=ultimoPagoDe(c); if(!k||!u||k.aprox||diasDesde(u,hoy)>45) continue;
+    for(let i=1;i<=10;i++){ const f=new Date(hoy); f.setDate(f.getDate()-i);
+      if(tocaEl(k,f)){ if(!yaPago(c,k,f) && diasDesde(u,f)>0) out.push({c,k,dias:i}); break; } }
+  }
+  return out.sort((a,b)=>a.dias-b.dias);
+}
+function pintarAgenda(){
+  K_CACHE=new Map(); clientes.forEach(c=>{ const k=cobroDe(c); if(k) K_CACHE.set(c.id,k); });
+  const hoy=new Date(); hoy.setHours(12,0,0,0);
+  if(!agSel) agSel=fechaISO(hoy);
+  // tira de 31 días a partir de hoy
+  const cont=$('#agDias'); let html='';
+  for(let i=0;i<31;i++){
+    const f=new Date(hoy); f.setDate(f.getDate()+i); const iso=fechaISO(f);
+    const n=clientesDelDia(f).filter(x=>!x.pagado&&!x.inactivo).length;
+    html+=`<button class="dia ${iso===agSel?'sel':''} ${i===0?'hoy':''} ${n?'hay':''}" data-f="${iso}"><small>${i===0?'Hoy':DIAS_SEM[f.getDay()].slice(0,3)}</small><b>${f.getDate()}</b><span>${n}</span></button>`;
+  }
+  cont.innerHTML=html;
+  cont.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{ agSel=b.dataset.f; pintarAgenda(); });
+  const selBtn=cont.querySelector('.sel'); if(selBtn) selBtn.scrollIntoView({inline:'center',block:'nearest'});
+
+  const f=new Date(agSel+'T12:00'), esHoy=agSel===fechaISO(hoy);
+  const items=clientesDelDia(f), pend=items.filter(x=>!x.pagado);
+  const atr=esHoy?atrasados(hoy).filter(x=>!items.some(y=>y.c.id===x.c.id)):[];
+  const esperado=pend.filter(x=>!x.inactivo).reduce((s,x)=>s+(x.c.ultimoPago||0),0);
+  const fila=(x,extra,sinMarcar)=>{
+    const u=ultimoPagoDe(x.c), marcado=!sinMarcar&&!x.pagado&&!x.inactivo&&!R.lista.includes(x.c.id);
+    const enRuta=R.estado==='activa'?(R.pendientes.includes(x.c.id)||R.actual===x.c.id):R.lista.includes(x.c.id);
+    return `<label class="agItem ${x.pagado?'pagado':''}">
+      <input type="checkbox" data-ag="${x.c.id}" ${marcado&&!enRuta?'checked':''} ${enRuta?'disabled':''}>
+      <div class="datos"><b>${esc(x.c.nombre)}</b><small>${x.c.ultimoPago?fmt(x.c.ultimoPago)+' · ':''}${u?'último pago '+new Date(u+'T12:00').toLocaleDateString('es-MX',{day:'numeric',month:'short'}):'sin pagos'}${x.k.aprox?' · día aprox.':''}${x.c.lat==null?' · ⚠️ sin ubicación':''}</small></div>
+      ${enRuta?'<span class="chip oro">En ruta</span>':x.pagado?'<span class="chip verde">Ya pagó</span>':x.inactivo?'<span class="chip">Sin pagar hace meses</span>':extra||''}
+      <button class="btn claro" data-ver="${x.c.id}" style="min-height:34px;padding:4px 10px;font-size:13px">Ver</button></label>`;
+  };
+  const titulo=f.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
+  $('#agLista').innerHTML=`
+    <div class="tarjeta" style="margin-bottom:12px"><b>${esHoy?'Hoy, '+titulo:titulo.charAt(0).toUpperCase()+titulo.slice(1)}</b>
+      <div style="color:var(--suave);font-size:14px;margin-top:4px">${pend.filter(x=>!x.inactivo).length} por cobrar${esperado?` · ${fmt(esperado)} esperados`:''}${items.length-pend.length?` · ${items.length-pend.length} ya pagaron`:''}</div></div>
+    ${items.length?items.map(x=>fila(x)).join(''):'<div class="vacio"><div class="icono">📅</div>Ningún cliente tiene este día de cobro.</div>'}
+    ${atr.length?`<details style="margin-top:14px"><summary style="font-weight:700;padding:6px 0">Atrasados (${atr.length})</summary><p style="margin:2px 0 8px;color:var(--suave);font-size:13px">Clientes de día fijo que te pagan seguido; su día pasó hace poco y aún no te pagan. Márcalos si quieres pasar con ellos.</p>${atr.map(x=>fila({...x,pagado:false,inactivo:false},`<span class="chip rojo">hace ${x.dias} día${x.dias>1?'s':''}</span>`,true)).join('')}</details>`:''}
+    <div class="agBarra"><button class="btn oro ancho" id="agAgregar">Agregar a la ruta</button></div>
+    <p style="color:var(--suave);font-size:12px;margin-top:10px">El día de cobro se calcula con las fechas en que te han pagado; puede variar unos días. Para cambiarlo: <b>Ver</b> → Día de cobro → Cambiar.</p>`;
+  const contar=()=>{ const n=$('#agLista').querySelectorAll('[data-ag]:checked').length; const b=$('#agAgregar'); b.disabled=!n; b.textContent=n?`Agregar ${n} a la ${R.estado==='activa'?'ruta en curso':'lista de cobranza'}`:'Marca los clientes que vas a cobrar'; };
+  $('#agLista').querySelectorAll('[data-ag]').forEach(x=>x.onchange=contar); contar();
+  $('#agLista').querySelectorAll('[data-ver]').forEach(b=>b.onclick=e=>{ e.preventDefault(); verCliente(b.dataset.ver); });
+  $('#agAgregar').onclick=()=>{
+    const ids=[...$('#agLista').querySelectorAll('[data-ag]:checked')].map(x=>x.dataset.ag);
+    if(R.estado==='activa'){ ids.forEach(id=>{ if(!R.lista.includes(id)) R.lista.push(id); if(!R.pendientes.includes(id)) R.pendientes.push(id); }); guardarRuta(); toast(`${ids.length} agregado(s) a la ruta en curso`); pintarAgenda(); return; }
+    ids.forEach(id=>{ if(!R.lista.includes(id)) R.lista.push(id); }); guardarRuta();
+    toast(`${ids.length} cliente(s) agregado(s) a la lista`); irTab('ruta');
+  };
+}
+async function cambiarCobro(c){
+  const k=cobroDe(c)||{tipo:'mensual',dia:new Date().getDate()};
+  const r=await dialogo({titulo:'Día de cobro',texto:`¿Cuándo le toca pagar a <b>${esc(c.nombre)}</b>?`,
+    html:`<div class="motivos" id="dTipo">${[['mensual','Cada mes'],['quincenal','Cada quincena'],['semanal','Cada semana'],['ninguno','Sin día']].map(([v,t])=>`<button type="button" data-v="${v}" class="${k.tipo===v?'sel':''}">${t}</button>`).join('')}</div>
+      <label class="campo" id="dDiaC"><span id="dDiaTxt">Día del mes</span><input id="dDia" type="number" inputmode="numeric" min="1" max="31" value="${k.tipo==='quincenal'?k.dias[0]:(k.dia||new Date().getDate())}"></label>
+      <label class="campo oculto" id="dDowC"><span>Día de la semana</span><select id="dDow" style="width:100%;border:1.5px solid var(--linea);border-radius:12px;padding:12px 14px;font:inherit">${DIAS_SEM.map((d,i)=>`<option value="${i}" ${k.dow===i?'selected':''}>${d}</option>`).join('')}</select></label>`,
+    alAbrir:v=>{ let tipo=k.tipo; const pon=()=>{ v.querySelectorAll('#dTipo button').forEach(b=>b.classList.toggle('sel',b.dataset.v===tipo));
+        v.querySelector('#dDiaC').classList.toggle('oculto',!(tipo==='mensual'||tipo==='quincenal')); v.querySelector('#dDowC').classList.toggle('oculto',tipo!=='semanal');
+        v.querySelector('#dDiaTxt').textContent=tipo==='quincenal'?'Primer día de la quincena (1 a 15)':'Día del mes'; v.dataset.tipo=tipo; };
+      v.querySelectorAll('#dTipo button').forEach(b=>b.onclick=()=>{ tipo=b.dataset.v; pon(); }); pon(); },
+    botones:[{txt:'Guardar',clase:'oro',valor:v=>{
+        const tipo=v.dataset.tipo, dia=parseInt(v.querySelector('#dDia').value,10);
+        if(tipo==='ninguno') return {tipo:'ninguno'};
+        if(tipo==='semanal') return {tipo,dow:+v.querySelector('#dDow').value,manual:true};
+        if(!(dia>=1&&dia<=(tipo==='quincenal'?15:31))){ toast(tipo==='quincenal'?'Escribe un día del 1 al 15':'Escribe un día del 1 al 31'); return undefined; }
+        return tipo==='quincenal'?{tipo,dias:[dia,dia+15],manual:true}:{tipo,dia,manual:true}; }},
+      {txt:'Usar el calculado con sus pagos',clase:'claro',valor:'auto'},
+      {txt:'Cancelar',clase:'claro',valor:null}]});
+  if(r===null) return false;
+  const u={...cliente(c.id),editado:new Date().toISOString()};
+  if(r==='auto') u.cobro=null; else if(r.tipo==='ninguno') u.cobro={tipo:'ninguno',manual:true}; else u.cobro=r;
+  await DB.poner('clientes',u); clientes[clientes.findIndex(x=>x.id===u.id)]=u;
+  toast('Día de cobro guardado'); return true;
+}
+
 /* ================= LISTA DESDE FOTO (lectura de texto en el teléfono) ================= */
 const TESS='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/';
 let tessCargado=null;
@@ -1126,6 +1292,7 @@ function buscarRepetidos(){
 }
 async function unirClientes(queda,sale,ubic=queda){
   const u={...queda, editado:new Date().toISOString(), verificado:queda.verificado||sale.verificado||null, ultimoPago:queda.ultimoPago||sale.ultimoPago||null,
+    pagos:[...new Set([...(queda.pagos||[]),...(sale.pagos||[])])].sort().slice(-24), cobro:queda.cobro||sale.cobro||null,
     telefono:queda.telefono||sale.telefono||'', referencia:queda.referencia||sale.referencia||'',
     foto:queda.foto||sale.foto||null, enlace:queda.enlace||sale.enlace||''};
   if(ubic.lat!=null){ u.lat=ubic.lat; u.lng=ubic.lng; }
@@ -1334,7 +1501,9 @@ function esperarRegreso(){
 }
 async function recordarPago(c,monto){
   const x=cliente(c.id); if(!x) return;
-  const u={...x,ultimoPago:monto}; await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===u.id)]=u;
+  const hoy=fechaISO(new Date());
+  const pagos=[...new Set([...(x.pagos||[]),hoy])].sort().slice(-24);
+  const u={...x,ultimoPago:monto,pagos}; await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===u.id)]=u;
 }
 async function registrarCobro(c,monto){
   monto=Math.round(monto*100)/100;
@@ -1468,7 +1637,7 @@ $('#archivoImportar').onchange=async e=>{
       if(c.lat!=null){ c.lat=Number(c.lat); c.lng=Number(c.lng); if(!isFinite(c.lat)||!isFinite(c.lng)){ c.lat=null; c.lng=null; } }
       const mismo=clientes.find(x=>x.id===c.id) || porNombre.get(norm(c.nombre));
       if(!mismo){ nuevos.push(c); porNombre.set(norm(c.nombre),c); continue; }
-      const CAMPOS=['telefono','referencia','foto','enlace','ultimoPago'];
+      const CAMPOS=['telefono','referencia','foto','enlace','ultimoPago','pagos','cobro'];
       if(mismo.id===c.id && (!mismo.editado || (c.editado && c.editado>mismo.editado))){
         // No lo has corregido en la app: se toma el del archivo, sin perder datos que solo tenías tú
         const u={...c}; CAMPOS.forEach(k=>{ if(!u[k] && mismo[k]) u[k]=mismo[k]; });
@@ -1479,6 +1648,8 @@ $('#archivoImportar').onchange=async e=>{
       repetidos++;
       const u={...mismo}; let cambio=false;
       CAMPOS.forEach(k=>{ if(!u[k] && c[k]){ u[k]=c[k]; cambio=true; } });
+      // Las fechas de pago se juntan (las de la app y las del archivo)
+      if(Array.isArray(c.pagos)&&c.pagos.length){ const j=[...new Set([...(u.pagos||[]),...c.pagos])].sort().slice(-24); if(j.length!==(u.pagos||[]).length){ u.pagos=j; cambio=true; } }
       if(u.lat==null && c.lat!=null){ u.lat=c.lat; u.lng=c.lng; cambio=true; }
       if(cambio) actualizados.push(u);
     }
