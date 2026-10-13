@@ -157,6 +157,8 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 .marcadorDest{width:34px;height:34px;border-radius:50% 50% 50% 0;background:var(--oro);transform:rotate(-45deg);border:3px solid var(--azul);display:grid;place-items:center}
 .marcadorDest span{transform:rotate(45deg);font-weight:800;color:var(--azul);font-size:14px}
 .leaflet-container{font:inherit}
+.alerta-tab{position:relative}
+.alerta-tab::after{content:'';position:absolute;top:6px;right:calc(50% - 18px);width:9px;height:9px;border-radius:50%;background:var(--rojo)}
 .toast{pointer-events:none;position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#14202E;color:#fff;padding:11px 16px;border-radius:12px;z-index:90;font-size:14px;max-width:90vw;text-align:center}
 </style>
 </head>
@@ -217,6 +219,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
     <div class="total"><small>Total cobrado hoy</small><b id="totalHoy2">$0.00</b></div>
     <div id="listaHist"></div>
     <h3>Respaldo de datos</h3>
+    <div id="avisoRespaldo"></div>
     <div class="tarjeta">
       <p style="margin:0 0 12px;color:var(--suave);font-size:14px">Tus clientes y cobros se guardan solo en este teléfono. Haz un respaldo de vez en cuando para no perderlos si cambias de teléfono.</p>
       <div class="fila">
@@ -247,7 +250,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v18';
+const APP_VERSION='v19';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -272,15 +275,19 @@ const textoMin = s => { const m=Math.max(1,Math.round(s/60)); return m<60 ? m+' 
 const estimarSegundos = m => (m*1.35)/(22/3.6); // calle ~22 km/h si no hay servidor de rutas
 
 function toast(msg,ms=2600){
+  document.querySelectorAll('.toast').forEach(x=>x.remove());
   const t=document.createElement('div'); t.className='toast'; t.textContent=msg;
   document.body.appendChild(t); setTimeout(()=>t.remove(),ms);
 }
 
+let ULTIMA_POS=null;   // {lat,lng,acc,t}: última posición del GPS
+function recordarPos(p){ ULTIMA_POS={lat:p.lat,lng:p.lng,acc:p.acc,t:Date.now()}; return p; }
+const posReciente=(ms=120000)=>ULTIMA_POS&&Date.now()-ULTIMA_POS.t<ms?ULTIMA_POS:null;
 function obtenerPosicion(timeout=15000){
   return new Promise((res,rej)=>{
     if(!navigator.geolocation) return rej(new Error('Este teléfono no permite usar el GPS.'));
     navigator.geolocation.getCurrentPosition(
-      p=>res({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),
+      p=>res(recordarPos({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy})),
       e=>rej(new Error(e.code===1?'Permiso de ubicación denegado. Actívalo en los ajustes del navegador.':'No se pudo obtener tu ubicación.')),
       {enableHighAccuracy:true,timeout,maximumAge:15000});
   });
@@ -339,6 +346,7 @@ function campana(){
     const ctx=new (window.AudioContext||window.webkitAudioContext)();
     [880,1175].forEach((f,i)=>{const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=f;o.connect(g);g.connect(ctx.destination);
       const t=ctx.currentTime+i*0.22; g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.3,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.35); o.start(t); o.stop(t+0.4);});
+    setTimeout(()=>{ try{ ctx.close(); }catch(e){} },1200);
   }catch(e){}
   if(navigator.vibrate) navigator.vibrate([300,120,300]);
 }
@@ -440,6 +448,7 @@ function dialogo({titulo='',texto='',html='',botones=[{txt:'Aceptar',clase:'',va
       caja.appendChild(el);
     });
     document.body.appendChild(velo);
+    asegurarAtras();
     if(alAbrir) alAbrir(velo);
   });
 }
@@ -462,6 +471,26 @@ function pedirMotivo(nombre){
     ]});
 }
 
+/* ================= Botón Atrás del teléfono =================
+   Cierra primero la ventana de arriba (diálogo u hoja); en la pestaña Clientes pide confirmar para salir. */
+let hayGuardia=false, avisoSalir=0;
+function asegurarAtras(){ if(hayGuardia) return; try{ history.pushState({ga:1},''); hayGuardia=true; }catch(e){} }
+window.addEventListener('popstate',()=>{
+  hayGuardia=false;
+  const velos=document.querySelectorAll('.velo');
+  if(velos.length){ const bs=velos[velos.length-1].querySelectorAll('.botones .btn'); if(bs.length) bs[bs.length-1].click(); asegurarAtras(); return; }
+  const hojas=document.querySelectorAll('.hoja');
+  if(hojas.length){ const h=hojas[hojas.length-1], x=h.querySelector('[data-cerrar]'); if(x) x.click(); else h.remove(); asegurarAtras(); return; }
+  if(!pantallaRuta.classList.contains('oculto')){
+    if(NAV) toast('La ruta sigue en curso. Usa ☰ para cambiar de cliente o terminar.',3500);
+    else { cerrarPantallaRuta(); mantenerPantalla(false); irTab('ruta'); }
+    asegurarAtras(); return;
+  }
+  if(tabActual!=='clientes'){ irTab('clientes'); asegurarAtras(); return; }
+  // En la pantalla principal: el siguiente Atrás sí cierra la app
+  avisoSalir=Date.now(); toast('Presiona Atrás otra vez para salir');
+});
+
 /* ================= Pestañas ================= */
 let tabActual='clientes';
 function irTab(t){
@@ -472,7 +501,9 @@ function irTab(t){
   if(t==='ruta') pintarArmado();
   if(t==='historial') pintarHistorial();
   window.scrollTo(0,0);
+  asegurarAtras();
 }
+function refrescarTab(){ if(tabActual==='clientes') pintarClientes(); else if(tabActual==='ruta') pintarArmado(); else pintarHistorial(); }
 document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>irTab(b.dataset.tab));
 
 function totalHoy(){
@@ -490,9 +521,9 @@ function pintarClientes(){
   const q=norm($('#buscarCliente').value);
   const lista=clientes.filter(c=>!q||norm(c.nombre).includes(q)).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
   const cont=$('#listaClientes');
+  $('#filaRevisar').classList.toggle('oculto',!clientes.length||!!q);
   if(!clientes.length){ cont.innerHTML=`<div class="vacio"><div class="icono">👥</div>Aún no tienes clientes registrados.<br>Toca <b>+ Nuevo cliente</b> o comparte tu ubicación desde Google Maps.</div>`; return; }
   if(!lista.length){ cont.innerHTML=`<div class="vacio">No hay clientes que coincidan con “${esc($('#buscarCliente').value)}”.</div>`; return; }
-  $('#filaRevisar').classList.toggle('oculto',!clientes.length||!!q);
   const nVer=clientes.filter(c=>c.verificado).length;
   $('#btnRevisar').textContent=nVer>=clientes.length?'✅ Todos verificados':`✅ Revisar todos (${nVer}/${clientes.length})`;
   const MAX=150, visibles=lista.slice(0,MAX);
@@ -509,7 +540,9 @@ function abrirHoja(titulo,cuerpoHTML,acciones=''){
   const h=document.createElement('div'); h.className='hoja';
   h.innerHTML=`<div class="barra"><button data-cerrar>← Atrás</button><b>${titulo}</b>${acciones}</div><div class="cuerpo">${cuerpoHTML}</div>`;
   document.body.appendChild(h);
-  h.querySelector('[data-cerrar]').onclick=()=>h.remove();
+  asegurarAtras();
+  // Al cerrar se repinta la pestaña de abajo para que no queden datos viejos
+  h.querySelector('[data-cerrar]').onclick=()=>{ h.remove(); if(!document.querySelector('.hoja')) refrescarTab(); };
   return h;
 }
 
@@ -602,7 +635,8 @@ function formCliente(existente=null,inicial={},alGuardar=null){
 
 function verCliente(id){
   const c=cliente(id); if(!c) return;
-  const enRuta=R.lista.includes(c.id);
+  const activa=R.estado==='activa';
+  const enRuta=activa?(R.pendientes.includes(c.id)||R.actual===c.id):R.lista.includes(c.id);
   const h=abrirHoja(esc(c.nombre),`
     ${c.foto?`<img class="foto" src="${c.foto}" alt="Fachada" style="margin-bottom:12px">`:''}
     <div class="tarjeta" style="margin-bottom:12px">
@@ -615,7 +649,7 @@ function verCliente(id){
     </div>
     ${c.lat!=null?'<div class="mapaForm" id="vMapa" style="margin-bottom:12px"></div>':''}
     <div style="display:flex;flex-direction:column;gap:8px">
-      <button class="btn oro" id="vRuta" ${R.estado==='activa'?'disabled':''}>${enRuta?'✓ Ya está en la lista de cobranza':'+ Agregar a la lista de cobranza'}</button>
+      <button class="btn oro" id="vRuta">${enRuta?'✓ Ya está en la ruta':(activa?'+ Agregar a la ruta en curso':'+ Agregar a la lista de cobranza')}</button>
       ${c.lat!=null?`<a class="btn claro" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}">Abrir en Google Maps</a>`:''}
       <div class="fila"><button class="btn claro" id="vEditar">Editar</button><button class="btn rojo" id="vBorrar">Eliminar</button></div>
     </div>`);
@@ -633,7 +667,12 @@ function verCliente(id){
 
 /* ================= ARMAR RUTA ================= */
 function agregarARuta(id){
-  if(R.estado==='activa'){ toast('Termina la ruta en curso para armar una nueva'); return; }
+  const c=cliente(id); if(!c) return;
+  if(R.estado==='activa'){
+    if(R.pendientes.includes(id)||R.actual===id){ toast('Ya está en la ruta'); return; }
+    if(!R.lista.includes(id)) R.lista.push(id);
+    R.pendientes.push(id); guardarRuta(); toast(c.nombre+' agregado a la ruta en curso'); return;
+  }
   if(!R.lista.includes(id)){ R.lista.push(id); guardarRuta(); toast((cliente(id)||{}).nombre+' agregado a la ruta'); }
 }
 function pintarArmado(){
@@ -767,7 +806,7 @@ function mostrarResultadosFoto(h,res){
     if(c.p>=0.6){ sel[i]=c.c.id; usados.add(c.c.id); } else sel[i]=null;
   });
   const pintar=()=>{
-    const n=Object.values(sel).filter(id=>id&&!R.lista.includes(id)).length;
+    const n=new Set(Object.values(sel).filter(id=>id&&!R.lista.includes(id))).size;
     const conCliente=filas.filter(r=>r.cands.length).length;
     cont.innerHTML=`<p style="margin:0 0 12px;color:var(--suave)">Leí <b>${filas.length}</b> nombre(s)${conCliente<filas.length?` · ${filas.length-conCliente} no están en tus clientes`:''}. Revisa cada uno:</p>
       ${filas.map((r,i)=>{
@@ -832,17 +871,22 @@ const pantallaRuta=$('#ruta');
 function abrirPantallaRuta(html){ pantallaRuta.innerHTML=html; pantallaRuta.classList.remove('oculto'); document.body.style.overflow='hidden'; }
 function cerrarPantallaRuta(){ pantallaRuta.classList.add('oculto'); pantallaRuta.innerHTML=''; document.body.style.overflow=''; }
 
-function reanudarRuta(){ if(R.actual && cliente(R.actual)) iniciarNavegacion(R.actual,true); else mostrarEleccion(); }
+function reanudarRuta(){
+  if(R.actual && cliente(R.actual) && R.pendientes.includes(R.actual)) iniciarNavegacion(R.actual,true);
+  else mostrarEleccion(R.cobros.length+R.cancelados.length>0);
+}
 
 async function mostrarEleccion(auto=false){
   detenerNavegacion();
   R.actual=null; R.alerta10=false;
   R.pendientes=R.pendientes.filter(id=>cliente(id)); guardarRuta();
-  if(!R.pendientes.length){ hablar('Ya no quedan clientes en la lista. Ruta concluida.'); return finalizarRuta(); }
+  if(!R.pendientes.length) return finalizarRuta();
   abrirPantallaRuta(`<div class="cargando"><div class="giro"></div>Buscando los clientes más cercanos…</div>`);
   mantenerPantalla(true);
   let pos=null, errorGPS='';
-  try{ pos=await obtenerPosicion(12000); }catch(e){ errorGPS=e.message; }
+  // Si el GPS se leyó hace poco (por ejemplo, en la casa del cliente anterior) se usa esa posición
+  pos=posReciente();
+  if(!pos){ try{ pos=await obtenerPosicion(12000); }catch(e){ errorGPS=e.message; } }
   const pend=R.pendientes.map(cliente);
   const conUb=pend.filter(c=>c.lat!=null), sinUb=pend.filter(c=>c.lat==null);
   let info={};
@@ -851,9 +895,10 @@ async function mostrarEleccion(auto=false){
     conUb.sort((a,b)=>info[a.id].m-info[b.id].m);
     // tiempos reales de manejo para los más cercanos (si hay internet)
     const cand=conUb.slice(0,6);
-    try{ const t=await tablaOSRM(pos,cand); cand.forEach((c,i)=>{ if(t[i].seg!=null) info[c.id]={m:t[i].m??info[c.id].m,seg:t[i].seg}; });
-      cand.sort((a,b)=>info[a.id].seg-info[b.id].seg); conUb.splice(0,cand.length,...cand);
-    }catch(e){ conUb.forEach(c=>info[c.id].seg=estimarSegundos(info[c.id].m)); }
+    try{ const t=await tablaOSRM(pos,cand); cand.forEach((c,i)=>{ if(t[i]&&t[i].seg!=null) info[c.id]={m:t[i].m??info[c.id].m,seg:t[i].seg}; }); }catch(e){}
+    // A los que no tienen tiempo de manejo se les estima (así nunca sale "NaN min")
+    conUb.forEach(c=>{ if(info[c.id].seg==null) info[c.id].seg=estimarSegundos(info[c.id].m); });
+    cand.sort((a,b)=>info[a.id].seg-info[b.id].seg); conUb.splice(0,cand.length,...cand);
   }
   const top=pos?conUb.slice(0,3):[];
   // Al terminar con un cliente se sigue solo con el más cercano
@@ -972,7 +1017,7 @@ function avisar(texto,voz){
 
 async function alMoverse(p){
   if(!NAV||NAV.llegado) return;
-  const c=NAV.c; NAV.ultimaPos=p;
+  const nav=NAV, c=nav.c; nav.ultimaPos=p; recordarPos(p);
   if(NAV.map){
     if(!NAV.yo) NAV.yo=L.marker([p.lat,p.lng],{icon:iconoYo(),zIndexOffset:1000}).addTo(NAV.map); else NAV.yo.setLatLng([p.lat,p.lng]);
     if(NAV.seguir){
@@ -989,24 +1034,24 @@ async function alMoverse(p){
     NAV.consultando=true; NAV.ultimoCalc=ahora; NAV.posCalc=p;
     try{
       const r=await rutaOSRM(p,c);
-      if(!NAV) return;
+      if(NAV!==nav) return;   // mientras tanto cambiaste de cliente
       NAV.eta=r.seg; NAV.metros=r.m; NAV.etaBase=r.seg; NAV.dBase=d; NAV.mBase=r.m;
       if(NAV.map){
         if(NAV.linea) NAV.linea.setLatLngs(r.puntos); else NAV.linea=L.polyline(r.puntos,{color:'#163B63',weight:6,opacity:.85}).addTo(NAV.map);
         if(!NAV.encuadrado){ NAV.map.fitBounds(NAV.linea.getBounds(),{padding:[40,40]}); NAV.encuadrado=true; }
       }
     }catch(e){
-      if(!NAV) return;
+      if(NAV!==nav) return;
       NAV.eta=estimarSegundos(d); NAV.metros=d*1.35; NAV.etaBase=NAV.eta; NAV.dBase=d; NAV.mBase=NAV.metros;
       if(NAV.map && !NAV.encuadrado){ NAV.map.fitBounds([[p.lat,p.lng],[c.lat,c.lng]],{padding:[50,50]}); NAV.encuadrado=true; }
     }
-    if(NAV) NAV.consultando=false;
+    nav.consultando=false;
   }else if(NAV.etaBase!=null && NAV.dBase>0){
     // ajustar el tiempo proporcionalmente a lo que se avanzó mientras no se recalcula
     const k=Math.min(1.5,d/NAV.dBase);
     NAV.eta=NAV.etaBase*k; NAV.metros=NAV.mBase*k;
   }
-  if(!NAV) return;
+  if(NAV!==nav) return;
   if(NAV.eta!=null){
     const mi=$('#nMin'), di=$('#nDist');
     if(mi) mi.textContent=textoMin(NAV.eta); if(di) di.textContent=textoDist(NAV.metros||d);
@@ -1080,7 +1125,7 @@ function buscarRepetidos(){
   return pares.sort((x,y)=>y.r-x.r||x.d-y.d);
 }
 async function unirClientes(queda,sale,ubic=queda){
-  const u={...queda, editado:new Date().toISOString(), verificado:queda.verificado||sale.verificado||null,
+  const u={...queda, editado:new Date().toISOString(), verificado:queda.verificado||sale.verificado||null, ultimoPago:queda.ultimoPago||sale.ultimoPago||null,
     telefono:queda.telefono||sale.telefono||'', referencia:queda.referencia||sale.referencia||'',
     foto:queda.foto||sale.foto||null, enlace:queda.enlace||sale.enlace||''};
   if(ubic.lat!=null){ u.lat=ubic.lat; u.lng=ubic.lng; }
@@ -1092,12 +1137,13 @@ async function unirClientes(queda,sale,ubic=queda){
   R.lista=cambia(R.lista); R.pendientes=cambia(R.pendientes); if(R.actual===sale.id) R.actual=u.id; guardarRuta();
 }
 function revisarRepetidos(){
-  let pares=buscarRepetidos(), i=0, unidos=0;
+  let pares=buscarRepetidos(), i=0, unidos=0, mapaPrevio=null;
   const h=abrirHoja('Posibles repetidos','<div id="rpCuerpo"></div>');
   const cuerpo=h.querySelector('#rpCuerpo');
   const tarjeta=(c,color)=>`<div class="tarjeta" style="border-left:6px solid ${color};margin-bottom:8px;padding:10px 12px">
       <b>${esc(c.nombre)}</b><br><small style="color:var(--suave)">${c.visitas?`${c.visitas} visita(s) · última ${new Date(c.ultimaVisita+'T12:00').toLocaleDateString('es-MX')}`:'Registrado en la app'}${c.telefono?' · 📞 '+esc(c.telefono):''}</small></div>`;
   const pintar=()=>{
+    if(mapaPrevio){ try{ mapaPrevio.off(); mapaPrevio.remove(); }catch(e){} mapaPrevio=null; }
     while(i<pares.length && (!cliente(pares[i].a.id)||!cliente(pares[i].b.id))) i++;
     if(i>=pares.length){
       cuerpo.innerHTML=`<div class="vacio"><div class="icono">✅</div>Ya no hay posibles repetidos por revisar.${unidos?`<br>Uniste ${unidos} cliente(s).`:''}</div>
@@ -1151,7 +1197,7 @@ function revisarRepetidos(){
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(m);
       const pin=(c,col,v)=>L.circleMarker([c.lat,c.lng],{radius:12,color:'#fff',weight:3,fillColor:col,fillOpacity:1,bubblingMouseEvents:false}).addTo(m).on('click',()=>{ selUbic=v; marcar(); });
       pin(B,'#2D7FF9','b'); pin(A,'#F2B134','a');
-      mapaRp=m; m.on('click',e=>ponerOtra({lat:e.latlng.lat,lng:e.latlng.lng}));
+      mapaRp=m; mapaPrevio=m; m.on('click',e=>ponerOtra({lat:e.latlng.lat,lng:e.latlng.lng}));
       m.fitBounds([[A.lat,A.lng],[B.lat,B.lng]],{padding:[50,50],maxZoom:18});
       setTimeout(()=>{ try{ if(m._mapPane) m.invalidateSize(false); }catch(e){} },200);
     }
@@ -1239,7 +1285,7 @@ async function llegada(c,manual){
   else { await ofrecerGuardarAqui(c); c=cliente(c.id)||c; }
   const r=await dialogo({
     titulo:'📍 Llegamos al destino', texto:`¿Te pagó <b>${esc(c.nombre)}</b>?`,
-    html:`<label class="campo"><span>Cantidad cobrada${c.ultimoPago?' <span class="opcional">(la de su último pago; cámbiala si pagó otra)</span>':''}</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${c.ultimoPago||''}"></label>`,
+    html:`<label class="campo"><span>Cantidad cobrada${c.ultimoPago?' <span class="opcional">(la de su último pago; cámbiala si pagó otra)</span>':''}</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${esc(c.ultimoPago||'')}"></label>`,
     alAbrir:v=>setTimeout(()=>{ const x=v.querySelector('#dMonto'); x.focus(); x.select(); },250),
     botones:[
       {txt:'Sí, registrar cobro',clase:'verde',valor:v=>{ const n=parseFloat(String(v.querySelector('#dMonto').value).replace(/[^0-9.]/g,''));
@@ -1256,8 +1302,14 @@ async function llegada(c,manual){
 function whatsActivo(){ try{ return localStorage.getItem('ga_whats')!=='0'; }catch(e){ return true; } }
 function posicionReporte(){
   if(NAV&&NAV.ultimaPos) return Promise.resolve(NAV.ultimaPos);
-  return new Promise(res=>{ if(!navigator.geolocation) return res(null);
-    navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lng:p.coords.longitude}),()=>res(null),{enableHighAccuracy:true,timeout:3000,maximumAge:60000}); });
+  const r=posReciente(60000); if(r) return Promise.resolve(r);
+  return obtenerPosicion(5000).catch(()=>null);
+}
+/* Pantalla mientras se manda el reporte: quita el mapa para que no se pueda tocar dos veces */
+function pantallaRegistrado(titulo,nombre){
+  detenerNavegacion();
+  abrirPantallaRuta(`<div class="cargando"><div style="font-size:46px">✅</div><b style="font-size:19px;color:var(--texto)">${esc(titulo)}</b><span>${esc(nombre)}</span>
+    <span style="font-size:14px;text-align:center">${whatsActivo()?'Envía el reporte en WhatsApp y regresa a la app con Atrás ◀':'Buscando el siguiente cliente…'}</span></div>`);
 }
 async function enviarWhats(pos,c,detalle){
   if(!whatsActivo()) return;
@@ -1288,8 +1340,8 @@ async function registrarCobro(c,monto){
   monto=Math.round(monto*100)/100;
   const pos=posicionReporte();
   R.cobros.push({id:c.id,nombre:c.nombre,monto,hora:new Date().toISOString()});
-  R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta(); pintarTotal();
-  toast(`Cobro de ${fmt(monto)} registrado`);
+  R.pendientes=R.pendientes.filter(x=>x!==c.id); R.actual=null; guardarRuta(); pintarTotal();
+  pantallaRegistrado(`Cobro de ${fmt(monto)} registrado`,c.nombre);
   recordarPago(c,monto);
   // Primero WhatsApp; la voz y el siguiente cliente, ya de regreso en la app (para que no se corten)
   await enviarWhats(await pos,c,String(monto%1?monto.toFixed(2):monto));
@@ -1299,8 +1351,8 @@ async function registrarCobro(c,monto){
 async function cancelarCobro(c,motivo){
   const pos=posicionReporte();
   R.cancelados.push({id:c.id,nombre:c.nombre,motivo,hora:new Date().toISOString()});
-  R.pendientes=R.pendientes.filter(x=>x!==c.id); guardarRuta();
-  toast('Cobro cancelado');
+  R.pendientes=R.pendientes.filter(x=>x!==c.id); R.actual=null; guardarRuta();
+  pantallaRegistrado('Cobro cancelado',`${c.nombre} · ${motivo}`);
   await enviarWhats(await pos,c,motivo);
   hablar('Cobro cancelado.');
   mostrarEleccion(true);
@@ -1341,7 +1393,7 @@ async function finalizarRuta(){
     total:R.cobros.reduce((s,c)=>s+c.monto,0)};
   await DB.poner('rutas',reg); rutas.push(reg);
   R=rutaVacia(); guardarRuta(); pintarTotal();
-  hablar(`Ruta terminada. Total cobrado: ${Math.round(reg.total)} pesos.`);
+  hablar(`Ruta terminada. Total cobrado: ${Math.round(reg.total)} pesos.`,true);
   cerrarPantallaRuta();
   mostrarResumen(reg,true);
   if(tabActual==='ruta') pintarArmado();
@@ -1372,8 +1424,16 @@ function mostrarResumen(r,recien=false){
     try{ await navigator.clipboard.writeText(t); toast('Resumen copiado. Pégalo donde quieras.'); }catch(e){ toast('No se pudo compartir'); }
   };
 }
+const DIAS_RESPALDO=7;
+function diasSinRespaldo(){ try{ const t=+localStorage.getItem('ga_respaldo'); return t?Math.floor((Date.now()-t)/864e5):null; }catch(e){ return null; } }
+function avisoRespaldo(){
+  const d=diasSinRespaldo(), toca=clientes.length>0 && (d==null||d>=DIAS_RESPALDO);
+  document.querySelector('nav.tabs [data-tab=historial]').classList.toggle('alerta-tab',toca);
+  const el=$('#avisoRespaldo'); if(!el) return;
+  el.innerHTML=toca?`<div class="aviso">⚠️ ${d==null?'Aún no has guardado un respaldo.':`Tu último respaldo fue hace ${d} días.`} Tus ${clientes.length} clientes solo están en este teléfono: guarda uno y mándatelo por WhatsApp o correo.</div>`:'';
+}
 function pintarHistorial(){
-  pintarTotal();
+  pintarTotal(); avisoRespaldo();
   const cont=$('#listaHist');
   const ord=[...rutas].sort((a,b)=>b.fin.localeCompare(a.fin));
   if(!ord.length){ cont.innerHTML='<div class="vacio"><div class="icono">📋</div>Aquí aparecerán tus rutas terminadas.</div>'; return; }
@@ -1388,9 +1448,11 @@ $('#btnExportar').onclick=async()=>{
   const nombre=`respaldo-alfa-cobranza-${new Date().toISOString().slice(0,10)}.json`;
   const blob=new Blob([JSON.stringify(datos)],{type:'application/json'});
   try{ const f=new File([blob],nombre,{type:'application/json'});
-    if(navigator.canShare&&navigator.canShare({files:[f]})){ await navigator.share({files:[f],title:'Respaldo Alfa Cobranza'}); return; } }catch(e){ if(e.name==='AbortError') return; }
+    if(navigator.canShare&&navigator.canShare({files:[f]})){ await navigator.share({files:[f],title:'Respaldo Alfa Cobranza'}); respaldoHecho(); return; } }catch(e){ if(e.name==='AbortError') return; }
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=nombre; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  respaldoHecho();
 };
+function respaldoHecho(){ try{ localStorage.setItem('ga_respaldo',String(Date.now())); }catch(e){} avisoRespaldo(); toast('Respaldo guardado'); }
 $('#btnImportar').onclick=()=>$('#archivoImportar').click();
 $('#archivoImportar').onchange=async e=>{
   const f=e.target.files[0]; e.target.value=''; if(!f) return;
@@ -1403,6 +1465,7 @@ $('#archivoImportar').onchange=async e=>{
     const nuevos=[], actualizados=[]; let repetidos=0;
     for(const c of d.clientes){
       if(!c||!c.id||!c.nombre) continue;
+      if(c.lat!=null){ c.lat=Number(c.lat); c.lng=Number(c.lng); if(!isFinite(c.lat)||!isFinite(c.lng)){ c.lat=null; c.lng=null; } }
       const mismo=clientes.find(x=>x.id===c.id) || porNombre.get(norm(c.nombre));
       if(!mismo){ nuevos.push(c); porNombre.set(norm(c.nombre),c); continue; }
       const CAMPOS=['telefono','referencia','foto','enlace','ultimoPago'];
@@ -1427,7 +1490,7 @@ $('#archivoImportar').onchange=async e=>{
     await DB.ponerVarios('clientes',[...nuevos,...actualizados]);
     await DB.ponerVarios('rutas',d.rutas);
     clientes=await DB.todos('clientes'); rutas=await DB.todos('rutas');
-    toast(`Listo: ${nuevos.length} cliente(s) agregado(s)`,3500); pintarClientes(); pintarHistorial(); pintarTotal();
+    toast(`Listo: ${nuevos.length} cliente(s) agregado(s)`,3500); pintarClientes(); pintarHistorial(); pintarTotal(); avisoRespaldo();
   }catch(err){ toast('No se pudo cargar: '+err.message,4000); }
 };
 
@@ -1466,9 +1529,10 @@ $('#cerrarTip').onclick=e=>{ e.preventDefault(); $('#tipCompartir').classList.ad
   catch(e){ toast('No se pudo abrir la base de datos del teléfono',5000); }
   if(navigator.storage&&navigator.storage.persist) navigator.storage.persist().catch(()=>{});
   if('speechSynthesis' in window) speechSynthesis.getVoices();
-  pintarTotal(); pintarClientes();
+  pintarTotal(); pintarClientes(); avisoRespaldo();
   if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
   await revisarCompartido();
+  asegurarAtras();
   if(R.estado==='activa' && !document.querySelector('.hoja')){ irTab('ruta'); reanudarRuta(); }
 })();
 </script>
