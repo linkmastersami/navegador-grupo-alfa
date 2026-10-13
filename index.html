@@ -322,7 +322,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v24';
+const APP_VERSION='v25';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -1410,7 +1410,7 @@ function iniciarNavegacion(id,reanudando=false){
   $('#nCentrar').onclick=()=>{ if(!NAV) return; NAV.seguir=true; if(NAV.ultimaPos&&NAV.map) NAV.map.setView([NAV.ultimaPos.lat,NAV.ultimaPos.lng],16); };
   if(sinUb) return;
   if(navigator.geolocation){
-    NAV.watch=navigator.geolocation.watchPosition(p=>alMoverse({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),
+    NAV.watch=navigator.geolocation.watchPosition(p=>alMoverse({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy,vel:p.coords.speed,t:Date.now()}),
       e=>{ if(e.code===1) toast('Activa el permiso de ubicación para seguir la ruta',4000); },
       {enableHighAccuracy:true,maximumAge:5000,timeout:20000});
   }
@@ -1434,7 +1434,12 @@ async function alMoverse(p){
   }
   const d=distancia(p,c);
   // Llegada
-  if(d<=70 && !(NAV.pausaLlegada>Date.now())){ return llegada(c,false); }
+  if(!(NAV.pausaLlegada>Date.now())){
+    if(hayLlegada(nav,p,d)) return llegada(c,false);
+    // Si el teléfono deja de mandar lecturas mientras estás quieto, se vuelve a revisar solo
+    clearTimeout(nav.revisa);
+    if(nav.cercaN||nav.zonaDesde) nav.revisa=setTimeout(()=>{ if(NAV===nav && !nav.llegado && nav.ultimaPos) alMoverse({...nav.ultimaPos,vel:0,t:Date.now()}); }, nav.cercaN?3000:LLEGADA.espera+500);
+  }
   // Recalcular tiempo cada 40 s o si se movió más de 250 m
   const ahora=Date.now();
   if(!NAV.consultando && (ahora-NAV.ultimoCalc>40000 || !NAV.posCalc || distancia(NAV.posCalc,p)>250)){
@@ -1469,6 +1474,27 @@ async function alMoverse(p){
       avisar('📞 '+txt+(c.telefono?'':''),txt);
     }
   }
+}
+
+/* ---- Detección de llegada ----
+   Llegas cuando estás a ~20 m (una o dos casas) en dos lecturas seguidas,
+   o cuando te quedas detenido a menos de 45 m por 15 segundos.
+   Se ignoran lecturas con GPS impreciso (> 50 m) o yendo a más de ~15 km/h. */
+const LLEGADA={cerca:22,zona:45,espera:15000,precision:50,velMax:4.2};
+function hayLlegada(nav,p,d){
+  const ahora=p.t||Date.now(), acc=p.acc==null?20:p.acc;
+  // velocidad: la del GPS o la calculada con la lectura anterior
+  let vel=(p.vel!=null&&p.vel>=0)?p.vel:null;
+  if(vel==null && nav.prevLL){ const dt=(ahora-nav.prevLL.t)/1000; if(dt>0.5) vel=distancia(nav.prevLL,p)/dt; }
+  nav.prevLL={lat:p.lat,lng:p.lng,t:ahora};
+  if(acc>LLEGADA.precision) return false;
+  const lento=vel==null||vel<=LLEGADA.velMax;
+  // muy cerca, confirmado por dos lecturas
+  if(d<=LLEGADA.cerca && lento){ nav.cercaN=(nav.cercaN||0)+1; if(nav.cercaN>=2) return true; } else nav.cercaN=0;
+  // detenido cerca de la casa
+  if(d<=LLEGADA.zona && lento){ if(!nav.zonaDesde) nav.zonaDesde=ahora; if(ahora-nav.zonaDesde>=LLEGADA.espera) return true; }
+  else if(d>LLEGADA.zona+10 || !lento) nav.zonaDesde=null;
+  return false;
 }
 
 /* ---- Corregir la ubicación del cliente durante la ruta ---- */
@@ -1681,6 +1707,7 @@ $('#btnRevisar').onclick=revisarTodos;
 
 function detenerNavegacion(){
   if(!NAV) return;
+  clearTimeout(NAV.revisa);
   if(NAV.watch!=null && navigator.geolocation) navigator.geolocation.clearWatch(NAV.watch);
   if(NAV.map) NAV.map.remove();
   NAV=null;
