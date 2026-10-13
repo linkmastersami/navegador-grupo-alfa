@@ -53,6 +53,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 .tarjeta{background:var(--tarjeta);border-radius:var(--radio);box-shadow:var(--sombra);padding:14px}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:12px;padding:13px 16px;
   font-weight:700;background:var(--azul);color:#fff;min-height:48px}
+a.btn{text-decoration:none}
 .btn.oro{background:var(--oro);color:var(--azul)}
 .btn.claro{background:#E8EDF3;color:var(--azul)}
 .btn.rojo{background:#FBE9E9;color:var(--rojo)}
@@ -319,7 +320,7 @@ nav.tabs button.activa svg{stroke:var(--oro2)}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v27';
+const APP_VERSION='v28';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -551,6 +552,8 @@ let hayGuardia=false, avisoSalir=0;
 function asegurarAtras(){ if(hayGuardia) return; try{ history.pushState({ga:1},''); hayGuardia=true; }catch(e){} }
 window.addEventListener('popstate',()=>{
   hayGuardia=false;
+  const encima=document.querySelector('.hoja.encima');
+  if(encima){ encima.querySelector('[data-cerrar]').click(); asegurarAtras(); return; }
   const velos=document.querySelectorAll('.velo');
   if(velos.length){ const bs=velos[velos.length-1].querySelectorAll('.botones .btn'); if(bs.length) bs[bs.length-1].click(); asegurarAtras(); return; }
   const hojas=document.querySelectorAll('.hoja');
@@ -1644,8 +1647,33 @@ async function llegada(c,manual){
   else { await ofrecerGuardarAqui(c); c=cliente(c.id)||c; }
   const r=await dialogo({
     titulo:'📍 Llegamos al destino', texto:`¿Te pagó <b>${esc(c.nombre)}</b>?`,
-    html:`<label class="campo"><span>Cantidad cobrada${c.ultimoPago?' <span class="opcional">(la de su último pago; cámbiala si pagó otra)</span>':''}</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${esc(c.ultimoPago||'')}"></label>`,
-    alAbrir:v=>setTimeout(()=>{ const x=v.querySelector('#dMonto'); x.focus(); x.select(); },250),
+    html:`<div id="dFotoCaja" style="margin-bottom:10px"></div>
+      <div class="fila" id="dTelCaja" style="margin-bottom:12px"></div>
+      <label class="campo"><span>Cantidad cobrada${c.ultimoPago?' <span class="opcional">(la de su último pago; cámbiala si pagó otra)</span>':''}</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${esc(c.ultimoPago||'')}"></label>
+      <input type="file" id="dFotoIn" accept="image/*" capture="environment" class="oculto">`,
+    alAbrir:v=>{
+      // Foto de la fachada: se muestra para ubicar la casa, o se toma si no tiene
+      const pintarFoto=()=>{ const x=cliente(c.id)||c, caja=v.querySelector('#dFotoCaja');
+        caja.innerHTML=x.foto?`<img class="foto" src="${x.foto}" alt="Fachada" style="max-height:30vh;cursor:zoom-in"><small style="display:block;color:var(--suave);margin-top:4px">Toca la foto para verla en grande · <a href="#" id="dFotoCambiar">cambiar foto</a></small>`
+          :`<button type="button" class="btn borde ancho" id="dFotoTomar">📷 Tomar foto de la fachada</button>`;
+        const img=caja.querySelector('img'); if(img) img.onclick=()=>verFotoGrande(x);
+        const t=caja.querySelector('#dFotoTomar,#dFotoCambiar'); if(t) t.onclick=e=>{ e.preventDefault(); v.querySelector('#dFotoIn').click(); }; };
+      v.querySelector('#dFotoIn').onchange=async e=>{ const f=e.target.files[0]; e.target.value=''; if(!f) return;
+        try{ const foto=await comprimirFoto(f); const u={...(cliente(c.id)||c),foto,editado:new Date().toISOString()};
+          await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===u.id)]=u; toast('Foto guardada'); pintarFoto(); }catch(err){ toast(err.message); } };
+      // Llamar al cliente, o agregar su teléfono si no lo tiene
+      const pintarTel=()=>{ const x=cliente(c.id)||c, caja=v.querySelector('#dTelCaja');
+        caja.innerHTML=x.telefono?`<a class="btn claro" href="tel:${esc(x.telefono)}" style="flex:1">📞 Llamar · ${esc(x.telefono)}</a>`
+          :`<button type="button" class="btn claro" id="dTelAgregar" style="flex:1">➕ Agregar teléfono</button>`;
+        const b=caja.querySelector('#dTelAgregar'); if(b) b.onclick=()=>{
+          caja.innerHTML=`<input id="dTelIn" type="tel" inputmode="tel" placeholder="10 dígitos" style="flex:1;border:1.5px solid var(--linea);border-radius:12px;padding:12px 14px;font:inherit;min-width:0"><button type="button" class="btn oro" id="dTelOk">Guardar</button>`;
+          const inp=caja.querySelector('#dTelIn'); inp.focus();
+          caja.querySelector('#dTelOk').onclick=async()=>{ const tel=inp.value.trim(); if(!tel){ toast('Escribe el teléfono'); return; }
+            const u={...(cliente(c.id)||c),telefono:tel,editado:new Date().toISOString()}; await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===u.id)]=u; toast('Teléfono guardado'); pintarTel(); }; }; };
+      pintarFoto(); pintarTel();
+      // Si no hay cantidad sugerida, el cursor queda listo para escribirla
+      if(!c.ultimoPago) setTimeout(()=>{ const x=v.querySelector('#dMonto'); x.focus(); x.select(); },250);
+    },
     botones:[
       {txt:'Sí, registrar cobro',clase:'verde',valor:v=>{ const n=parseFloat(String(v.querySelector('#dMonto').value).replace(/[^0-9.]/g,''));
           if(!(n>0)){ toast('Escribe la cantidad que te pagó'); return undefined; } return {pago:n}; }},
@@ -1655,6 +1683,12 @@ async function llegada(c,manual){
   if(r.pago){ registrarCobro(c,r.pago); return; }
   if(r.noPago){ const m=await pedirMotivo(c.nombre); if(m){ cancelarCobro(c,m); return; } }
   if(NAV){ NAV.llegado=false; NAV.pausaLlegada=Date.now()+90000; }
+}
+
+/* Foto de la fachada en pantalla completa */
+function verFotoGrande(c){
+  const h=abrirHoja(esc(c.nombre),`<img src="${c.foto}" alt="Fachada" style="width:100%;border-radius:14px;display:block">${c.referencia?`<p style="color:var(--suave)">${esc(c.referencia)}</p>`:''}`);
+  h.style.zIndex=70; h.classList.add('encima');   // encima de la ventana de llegada
 }
 
 /* ---- Reporte de cada visita por WhatsApp (mismo formato que pide la oficina) ---- */
