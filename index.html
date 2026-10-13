@@ -320,7 +320,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v28';
+const APP_VERSION='v29';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -530,10 +530,10 @@ function dialogo({titulo='',texto='',html='',botones=[{txt:'Aceptar',clase:'',va
 const confirmar=(titulo,texto,si='Sí',clase='')=>dialogo({titulo,texto,botones:[{txt:si,clase:clase||'',valor:true},{txt:'Cancelar',clase:'claro',valor:false}]});
 
 const MOTIVOS=['No hay nadie','No está y no dejó su pago','Reagendó para: ','No hay paso a su domicilio','Para mañana','Que pase más tarde'];
-function pedirMotivo(nombre){
+function pedirMotivo(nombre,extra=[]){
   return dialogo({
     titulo:'Cancelar cobro', texto:`¿Por qué se cancela el cobro de <b>${esc(nombre)}</b>?`,
-    html:`<div class="motivos">${MOTIVOS.map(m=>`<button type="button" data-m="${m}">${m.trim()}</button>`).join('')}</div>
+    html:`<div class="motivos">${[...extra,...MOTIVOS].map(m=>`<button type="button" data-m="${m}">${m.trim()}</button>`).join('')}</div>
           <label class="campo"><span>Motivo u observaciones</span><textarea id="txtMotivo" rows="2" placeholder="Escribe el motivo…"></textarea></label>`,
     alAbrir:v=>{ v.querySelectorAll('.motivos button').forEach(b=>b.onclick=()=>{
         v.querySelectorAll('.motivos button').forEach(x=>x.classList.remove('sel')); b.classList.add('sel');
@@ -1187,6 +1187,21 @@ function pintarMapaRuta(){
   setTimeout(()=>{ try{ mapaRuta.invalidateSize(false); if(puntos.length) mapaRuta.fitBounds(puntos,{padding:[50,50],maxZoom:16}); else mapaRuta.setView([CENTRO_DEFECTO.lat,CENTRO_DEFECTO.lng],11); }catch(e){} },60);
 }
 
+/* ---- Cancelar un cobro sin ir (el cliente avisó por teléfono) ----
+   El reporte de WhatsApp va sin ubicación porque no estás en su casa. */
+async function cancelarSinVisita(c){
+  if(!c) return;
+  const m=await pedirMotivo(c.nombre,['Canceló por llamada']); if(!m) return;
+  const eraActual=R.actual===c.id;
+  R.cancelados.push({id:c.id,nombre:c.nombre,motivo:m,hora:new Date().toISOString(),sinVisita:true});
+  R.pendientes=R.pendientes.filter(x=>x!==c.id); if(eraActual) R.actual=null; guardarRuta();
+  if(eraActual) pantallaRegistrado('Cobro cancelado',`${c.nombre} · ${m}`); else toast(`Cancelado: ${c.nombre}`);
+  await enviarWhats(null,c,m);
+  if(eraActual){ hablar('Cobro cancelado.'); return mostrarEleccion(true); }
+  if(!R.pendientes.length) return finalizarRuta();
+  if(vistaRuta==='orden') pintarOrden();
+}
+
 /* ---- Vista Lista: pendientes del más cercano al más lejano ---- */
 function pintarOrden(){
   const el=$('#rvOrden');
@@ -1195,15 +1210,18 @@ function pintarOrden(){
   const resto=R.pendientes.filter(id=>id!==R.actual).map(cliente).filter(Boolean)
     .sort((a,b)=>(a.lat==null)-(b.lat==null) || (yo&&a.lat!=null&&b.lat!=null?distancia(yo,a)-distancia(yo,b):0));
   const item=c=>`<div class="oItem"><div class="datos"><b>${esc(c.nombre)}</b><small>${c.ultimoPago?fmt(c.ultimoPago):''}${c.lat==null?' · ⚠️ sin ubicación':(yo?' · a '+textoDist(distancia(yo,c))+' de ti':'')}</small></div>
+    <button class="btn rojo" data-cancelar="${c.id}" style="min-height:36px;padding:6px 10px;font-size:13px">Cancelar</button>
     <button class="btn claro" data-ir="${c.id}" style="min-height:36px;padding:6px 14px;font-size:14px">Ir</button></div>`;
   el.innerHTML=`
     <h2 style="margin:0 0 4px">Clientes de la ruta</h2>
     <p style="margin:0 0 12px;color:var(--suave);font-size:13px">${resto.length} por visitar, del más cercano al más lejano${yo?'':' (activa el GPS para ordenarlos por cercanía)'}. Toca <b>Ir</b> para cambiar de cliente.</p>
-    ${act?`<div class="tarjeta" style="margin-bottom:10px;border-left:6px solid var(--oro)"><small style="color:var(--suave)">Ahora vas con</small><br><b>${esc(act.nombre)}</b></div>`:''}
+    ${act?`<div class="tarjeta" style="margin-bottom:10px;border-left:6px solid var(--oro);display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><small style="color:var(--suave)">Ahora vas con</small><br><b>${esc(act.nombre)}</b></div>
+      <button class="btn rojo" data-cancelar="${act.id}" style="min-height:36px;padding:6px 10px;font-size:13px">Cancelar</button></div>`:''}
     <div id="oLista">${resto.length?resto.map(item).join(''):'<div class="vacio" style="padding:16px">No hay más clientes pendientes.</div>'}</div>
     <button class="btn borde ancho" id="oAgregar" style="margin-top:6px">➕ Agregar otro cliente a la ruta</button>
     ${R.cobros.length||R.cancelados.length?`<h3>Ya visitados</h3><div class="tarjeta">${R.cobros.map(x=>`<div class="renglon"><div class="izq">✓ ${esc(x.nombre)}</div><div class="der">${fmt(x.monto)}</div></div>`).join('')}${R.cancelados.map(x=>`<div class="renglon"><div class="izq">✗ ${esc(x.nombre)}<small>${esc(x.motivo)}</small></div></div>`).join('')}</div>`:''}`;
   el.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>irCon(b.dataset.ir));
+  el.querySelectorAll('[data-cancelar]').forEach(b=>b.onclick=()=>cancelarSinVisita(cliente(b.dataset.cancelar)));
   $('#oAgregar').onclick=()=>agregarEnRuta(()=>pintarOrden());
 }
 
