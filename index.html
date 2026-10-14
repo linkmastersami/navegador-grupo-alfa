@@ -171,6 +171,12 @@ a.btn{text-decoration:none}
 .renglon .izq{min-width:0}
 .renglon .izq small{display:block;color:var(--suave);font-size:13px}
 .renglon .der{font-weight:800;white-space:nowrap}
+.renglon.toque{cursor:pointer}
+.renglon.toque:active{background:#F4F6F9}
+.renglon .num{color:var(--suave);font-weight:700}
+.segm{display:flex;background:#E6EAF0;border-radius:12px;padding:3px;gap:3px;margin:12px 0 10px}
+.segm button{flex:1;border:0;background:transparent;padding:9px 4px;border-radius:9px;font-weight:700;font-size:13px;color:var(--suave);font-family:inherit}
+.segm button.sel{background:#fff;color:var(--texto);box-shadow:var(--sombra)}
 .ruta-hist{display:flex;justify-content:space-between;align-items:center;width:100%;background:#fff;border-radius:14px;padding:12px 14px;box-shadow:var(--sombra);text-align:left;color:inherit;margin-bottom:10px}
 .ruta-hist small{display:block;color:var(--suave);font-size:13px}
 .ruta-hist b.monto2{color:var(--verde);font-size:17px}
@@ -320,7 +326,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v29';
+const APP_VERSION='v30';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -394,23 +400,38 @@ function elegirVoz(){
   vozES=vs[0]||null; return vozES;
 }
 if('speechSynthesis' in window){ elegirVoz(); speechSynthesis.addEventListener('voiceschanged',elegirVoz); }
-function hablar(texto,encolar=false){
+/* Cola de voz: cada aviso espera a que termine el anterior (nunca se cortan entre sí) */
+const VOZ={cola:[],hablando:false,reloj:null,esperando:false};
+function hablar(texto){
   try{
-    if(!('speechSynthesis' in window)) return;
-    const decir=()=>{
-      if(!encolar) speechSynthesis.cancel();
-      const u=new SpeechSynthesisUtterance(texto);
-      const v=vozES||elegirVoz();
-      if(v){ u.voice=v; u.lang=v.lang; } else u.lang='es-MX';
-      u.rate=1; speechSynthesis.speak(u);
-    };
-    // Si el teléfono aún no carga sus voces, se espera un momento para no hablar en inglés
-    if(!vozES && !speechSynthesis.getVoices().length){
-      let hecho=false; const ya=()=>{ if(hecho) return; hecho=true; decir(); };
-      speechSynthesis.addEventListener('voiceschanged',ya,{once:true}); setTimeout(ya,1200);
-    } else decir();
+    if(!('speechSynthesis' in window)||!texto) return;
+    if(VOZ.cola.includes(texto)) return;          // no repetir el mismo aviso dos veces seguidas
+    VOZ.cola.push(texto); siguienteVoz();
   }catch(e){}
 }
+function siguienteVoz(){
+  if(VOZ.hablando||VOZ.esperando||!VOZ.cola.length) return;
+  // Si el teléfono aún no carga sus voces, se espera un momento para no hablar en inglés
+  if(!vozES && !speechSynthesis.getVoices().length && !VOZ.yaEspero){
+    VOZ.esperando=true; VOZ.yaEspero=true;
+    let hecho=false; const ya=()=>{ if(hecho) return; hecho=true; VOZ.esperando=false; siguienteVoz(); };
+    speechSynthesis.addEventListener('voiceschanged',ya,{once:true}); setTimeout(ya,1200); return;
+  }
+  const texto=VOZ.cola.shift(); VOZ.hablando=true;
+  let listo=false;
+  const fin=()=>{ if(listo) return; listo=true; clearTimeout(VOZ.reloj); VOZ.hablando=false; setTimeout(siguienteVoz,300); };
+  try{
+    const u=new SpeechSynthesisUtterance(texto);
+    const v=vozES||elegirVoz();
+    if(v){ u.voice=v; u.lang=v.lang; } else u.lang='es-MX';
+    u.rate=1; u.onend=fin; u.onerror=fin;
+    // Por si el teléfono no avisa que terminó: se calcula cuánto tarda en decirlo
+    VOZ.reloj=setTimeout(fin,2500+texto.length*120);
+    try{ speechSynthesis.resume(); }catch(e){}
+    speechSynthesis.speak(u);
+  }catch(e){ fin(); }
+}
+function callarVoz(){ VOZ.cola=[]; try{ speechSynthesis.cancel(); }catch(e){} }
 function campana(){
   try{
     const ctx=new (window.AudioContext||window.webkitAudioContext)();
@@ -1219,7 +1240,9 @@ function pintarOrden(){
       <button class="btn rojo" data-cancelar="${act.id}" style="min-height:36px;padding:6px 10px;font-size:13px">Cancelar</button></div>`:''}
     <div id="oLista">${resto.length?resto.map(item).join(''):'<div class="vacio" style="padding:16px">No hay más clientes pendientes.</div>'}</div>
     <button class="btn borde ancho" id="oAgregar" style="margin-top:6px">➕ Agregar otro cliente a la ruta</button>
-    ${R.cobros.length||R.cancelados.length?`<h3>Ya visitados</h3><div class="tarjeta">${R.cobros.map(x=>`<div class="renglon"><div class="izq">✓ ${esc(x.nombre)}</div><div class="der">${fmt(x.monto)}</div></div>`).join('')}${R.cancelados.map(x=>`<div class="renglon"><div class="izq">✗ ${esc(x.nombre)}<small>${esc(x.motivo)}</small></div></div>`).join('')}</div>`:''}`;
+    ${R.cobros.length||R.cancelados.length?`<h3>Ya visitados</h3><p style="margin:-4px 0 8px;color:var(--suave);font-size:13px">¿Te equivocaste? Toca un cliente para corregir la cantidad o deshacerlo.</p>
+      <div class="tarjeta">${itemsRuta(R,true).filter(x=>x.tipo!=='pendiente').sort((a,b)=>a.hora.localeCompare(b.hora)).map(x=>renglonVisita(x,false)).join('')}</div>`:''}`;
+  el.querySelectorAll('[data-visita]').forEach(b=>b.onclick=()=>editarVisita(R,true,b.dataset.visita,()=>{ pintarOrden(); pintarTotal(); }));
   el.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>irCon(b.dataset.ir));
   el.querySelectorAll('[data-cancelar]').forEach(b=>b.onclick=()=>cancelarSinVisita(cliente(b.dataset.cancelar)));
   $('#oAgregar').onclick=()=>agregarEnRuta(()=>pintarOrden());
@@ -1259,7 +1282,7 @@ async function mostrarEleccion(auto=false){
   if(auto && top.length){
     const sig=top[0];
     toast(`Siguiente: ${sig.nombre}${info[sig.id]?' · '+textoDist(info[sig.id].m):''}`,3500);
-    hablar(`Siguiente cliente: ${sig.nombre}`,true);
+    hablar(`Siguiente cliente: ${sig.nombre}`);
     return iniciarNavegacion(sig.id);
   }
   const cobrado=R.cobros.reduce((s,c)=>s+c.monto,0);
@@ -1277,10 +1300,12 @@ async function mostrarEleccion(auto=false){
       <div id="listaOtros" class="${top.length?'oculto':''}">${resto.map(c=>tarjeta(c,false)).join('')}</div>`:''}
     <button class="btn borde ancho" id="btnAgregarRuta" style="margin-top:6px">➕ Agregar otro cliente a la ruta</button>
     <button class="btn rojo ancho" id="btnTerminar" style="margin-top:14px">Terminar ruta</button>
+    <button class="btn borde ancho" id="btnDescartar" style="margin-top:8px">🗑️ Cancelar ruta (no guardar)</button>
   </div>`);
   pantallaRuta.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>iniciarNavegacion(b.dataset.ir));
   const bo=$('#btnOtro'); if(bo) bo.onclick=()=>{ $('#listaOtros').classList.toggle('oculto'); };
   $('#btnTerminar').onclick=terminarRutaManual;
+  $('#btnDescartar').onclick=descartarRuta;
   $('#btnAgregarRuta').onclick=()=>agregarEnRuta(mostrarEleccion);
 }
 
@@ -1331,10 +1356,12 @@ function iniciarNavegacion(id,reanudando=false){
       {txt:'➕ Agregar otro cliente a la ruta',clase:'oro',valor:'agregar'},
       {txt:'🔀 Cambiar de cliente (este sigue pendiente)',clase:'claro',valor:'cambiar'},
       {txt:'Terminar ruta',clase:'rojo',valor:'terminar'},
-      {txt:'Cancelar',clase:'claro',valor:null}]});
+      {txt:'🗑️ Cancelar ruta (no guardar)',clase:'borde',valor:'descartar'},
+      {txt:'Cerrar',clase:'claro',valor:null}]});
     if(op==='agregar') agregarEnRuta(()=>{ const p=$('.pildora'); if(p) p.innerHTML=`Cobrado: <b>${fmt(R.cobros.reduce((s,x)=>s+x.monto,0))}</b> · Faltan ${R.pendientes.length}`; });
     if(op==='cambiar') cambiarVista('orden');
     if(op==='terminar') terminarRutaManual();
+    if(op==='descartar') descartarRuta();
   };
   $('#nCancelar').onclick=async()=>{ const m=await pedirMotivo(c.nombre); if(m) cancelarCobro(c,m); };
   $('#nLlegue').onclick=()=>llegada(c,true);
@@ -1752,7 +1779,9 @@ async function recordarPago(c,monto){
 async function registrarCobro(c,monto){
   monto=Math.round(monto*100)/100;
   const pos=posicionReporte();
-  R.cobros.push({id:c.id,nombre:c.nombre,monto,hora:new Date().toISOString()});
+  const x=cliente(c.id)||c, hoy=fechaISO(new Date());
+  R.cobros.push({id:c.id,nombre:c.nombre,monto,hora:new Date().toISOString(),
+    antes:{ultimoPago:x.ultimoPago??null,teniaHoy:(x.pagos||[]).includes(hoy)}});
   R.pendientes=R.pendientes.filter(x=>x!==c.id); R.actual=null; guardarRuta(); pintarTotal();
   pantallaRegistrado(`Cobro de ${fmt(monto)} registrado`,c.nombre);
   recordarPago(c,monto);
@@ -1803,39 +1832,158 @@ async function finalizarRuta(){
   const reg={id:uid(),inicio:R.inicio||new Date().toISOString(),fin:new Date().toISOString(),
     cobros:R.cobros,cancelados:R.cancelados,
     pendientes:R.pendientes.map(id=>(cliente(id)||{}).nombre).filter(Boolean),
+    pendIds:R.pendientes.filter(id=>cliente(id)),
+    orden:[...R.lista],
     total:R.cobros.reduce((s,c)=>s+c.monto,0)};
   await DB.poner('rutas',reg); rutas.push(reg);
   R=rutaVacia(); guardarRuta(); pintarTotal();
-  hablar(`Ruta terminada. Total cobrado: ${Math.round(reg.total)} pesos.`,true);
+  hablar(`Ruta terminada. Total cobrado: ${Math.round(reg.total)} pesos.`);
   cerrarPantallaRuta();
   mostrarResumen(reg,true);
   if(tabActual==='ruta') pintarArmado();
 }
 
 /* ================= RESUMEN E HISTORIAL ================= */
+/* Todos los clientes de una ruta en un solo listado: cobrados, cancelados y no visitados */
+function itemsRuta(r,enCurso){
+  const it=[];
+  r.cobros.forEach((c,i)=>it.push({k:'c'+i,tipo:'cobro',id:c.id,nombre:c.nombre,monto:c.monto,hora:c.hora}));
+  r.cancelados.forEach((c,i)=>it.push({k:'x'+i,tipo:'cancelado',id:c.id,nombre:c.nombre,motivo:c.motivo,hora:c.hora}));
+  if(enCurso) r.pendientes.forEach((id,i)=>{ const c=cliente(id); if(c) it.push({k:'p'+i,tipo:'pendiente',id,nombre:c.nombre,hora:''}); });
+  else r.pendientes.forEach((n,i)=>it.push({k:'p'+i,tipo:'pendiente',id:(r.pendIds||[])[i],nombre:n,hora:''}));
+  return it;
+}
+const MODOS_ORDEN=[['lista','Como mi lista'],['hora','Hora de cobro'],['az','A – Z']];
+function modoOrden(r){ let m='lista'; try{ m=localStorage.getItem('ga_ordenRes')||'lista'; }catch(e){}
+  if(m==='lista'&&!r.orden) m='hora';   // rutas viejas no guardaron el orden de la lista
+  return m; }
+function ordenarItems(items,modo,orden){
+  const pos=x=>{ const i=(orden||[]).indexOf(x.id); return i<0?1e9:i; };
+  const az=(a,b)=>a.nombre.localeCompare(b.nombre,'es',{sensitivity:'base'});
+  const porHora=(a,b)=>(a.tipo==='pendiente')-(b.tipo==='pendiente') || (a.hora||'').localeCompare(b.hora||'') || pos(a)-pos(b);
+  const f=modo==='az'?az:modo==='hora'?porHora:(a,b)=>pos(a)-pos(b)||porHora(a,b);
+  return [...items].sort(f);
+}
+function renglonVisita(x,num){
+  const marca=x.tipo==='cobro'?'✓':x.tipo==='cancelado'?'✗':'○';
+  const sub=x.tipo==='cobro'?hora(x.hora):x.tipo==='cancelado'?`${esc(x.motivo)} · ${hora(x.hora)}`:'';
+  const der=x.tipo==='cobro'?fmt(x.monto):x.tipo==='cancelado'?'<span class="chip rojo">Cancelado</span>':'<span class="chip">No visitado</span>';
+  return `<div class="renglon toque" data-visita="${x.k}"><div class="izq">${num?`<span class="num">${num}.</span> `:''}${marca} ${esc(x.nombre)}${sub?`<small>${sub}</small>`:''}</div><div class="der">${der}</div></div>`;
+}
 function textoResumen(r){
+  const items=ordenarItems(itemsRuta(r,false),modoOrden(r),r.orden);
   let t=`GRUPO ALFA COBRANZA\nResumen de ruta – ${fechaLarga(r.fin)}\n${hora(r.inicio)} a ${hora(r.fin)}\n\nTOTAL COBRADO: ${fmt(r.total)}\n`;
-  if(r.cobros.length) t+='\nCobrados:\n'+r.cobros.map((c,i)=>`${i+1}. ${c.nombre} – ${fmt(c.monto)} (${hora(c.hora)})`).join('\n')+'\n';
-  if(r.cancelados.length) t+='\nCancelados:\n'+r.cancelados.map(c=>`• ${c.nombre} – ${c.motivo}`).join('\n')+'\n';
-  if(r.pendientes.length) t+='\nNo visitados:\n'+r.pendientes.map(n=>`• ${n}`).join('\n')+'\n';
+  t+=`Cobrados: ${r.cobros.length}${r.cancelados.length?` · Cancelados: ${r.cancelados.length}`:''}${r.pendientes.length?` · No visitados: ${r.pendientes.length}`:''}\n\n`;
+  t+=items.map((x,i)=>`${i+1}. ${x.nombre} – ${x.tipo==='cobro'?`${fmt(x.monto)} (${hora(x.hora)})`:x.tipo==='cancelado'?`Cancelado: ${x.motivo}`:'No visitado'}`).join('\n')+'\n';
   return t;
 }
 function mostrarResumen(r,recien=false){
-  const h=abrirHoja(recien?'Ruta terminada':'Resumen de ruta',`
+  const h=abrirHoja(recien?'Ruta terminada':'Resumen de ruta','');
+  const cuerpo=h.querySelector('.cuerpo');
+  const pintar=()=>{
+    const modo=modoOrden(r);
+    const items=ordenarItems(itemsRuta(r,false),modo,r.orden);
+    cuerpo.innerHTML=`
     <div class="total"><small>Total cobrado</small><b>${fmt(r.total)}</b>
       <div style="font-size:13px;opacity:.85;margin-top:4px">${fechaLarga(r.fin)} · ${hora(r.inicio)} a ${hora(r.fin)}</div></div>
-    <h3>Cobrados (${r.cobros.length})</h3>
-    <div class="tarjeta">${r.cobros.length?r.cobros.map(c=>`<div class="renglon"><div class="izq">${esc(c.nombre)}<small>${hora(c.hora)}</small></div><div class="der">${fmt(c.monto)}</div></div>`).join(''):'<div class="vacio" style="padding:12px">Sin cobros</div>'}</div>
-    ${r.cancelados.length?`<h3>Cancelados (${r.cancelados.length})</h3><div class="tarjeta">${r.cancelados.map(c=>`<div class="renglon"><div class="izq">${esc(c.nombre)}<small>${esc(c.motivo)} · ${hora(c.hora)}</small></div><div class="der"><span class="chip rojo">Cancelado</span></div></div>`).join('')}</div>`:''}
-    ${r.pendientes.length?`<h3>No visitados (${r.pendientes.length})</h3><div class="tarjeta">${r.pendientes.map(n=>`<div class="renglon"><div class="izq">${esc(n)}</div></div>`).join('')}</div>`:''}
+    <div class="fila" style="flex-wrap:wrap;gap:6px;margin-top:12px"><span class="pildora">✓ Cobrados: <b>${r.cobros.length}</b></span>${r.cancelados.length?`<span class="pildora">✗ Cancelados: <b>${r.cancelados.length}</b></span>`:''}${r.pendientes.length?`<span class="pildora">○ No visitados: <b>${r.pendientes.length}</b></span>`:''}</div>
+    <div class="segm" id="rOrden">${MODOS_ORDEN.filter(([m])=>m!=='lista'||r.orden).map(([m,t])=>`<button type="button" data-modo="${m}" class="${m===modo?'sel':''}">${t}</button>`).join('')}</div>
+    <div class="tarjeta">${items.length?items.map((x,i)=>renglonVisita(x,i+1)).join(''):'<div class="vacio" style="padding:12px">Sin clientes</div>'}</div>
+    <p style="margin:8px 2px 0;color:var(--suave);font-size:13px">¿Algo quedó mal? Toca un cliente para corregirlo.</p>
     <button class="btn oro ancho" id="rCompartir" style="margin-top:16px">Compartir resumen (WhatsApp, etc.)</button>
-    <button class="btn claro ancho" id="rListo" style="margin-top:8px">Listo</button>`);
-  h.querySelector('#rListo').onclick=()=>{ h.remove(); if(recien) irTab('historial'); };
-  h.querySelector('#rCompartir').onclick=async()=>{
-    const t=textoResumen(r);
-    try{ if(navigator.share){ await navigator.share({title:'Resumen de cobranza',text:t}); return; } }catch(e){ if(e.name==='AbortError') return; }
-    try{ await navigator.clipboard.writeText(t); toast('Resumen copiado. Pégalo donde quieras.'); }catch(e){ toast('No se pudo compartir'); }
+    <button class="btn claro ancho" id="rListo" style="margin-top:8px">Listo</button>
+    <button class="btn borde ancho" id="rEliminar" style="margin-top:22px;color:#C62828;border-color:#E8B4B4">🗑️ Eliminar esta ruta</button>`;
+    cuerpo.querySelectorAll('[data-modo]').forEach(b=>b.onclick=()=>{ try{ localStorage.setItem('ga_ordenRes',b.dataset.modo); }catch(e){} pintar(); });
+    cuerpo.querySelectorAll('[data-visita]').forEach(b=>b.onclick=()=>editarVisita(r,false,b.dataset.visita,pintar));
+    cuerpo.querySelector('#rListo').onclick=()=>{ h.remove(); if(recien) irTab('historial'); else refrescarTab(); };
+    cuerpo.querySelector('#rCompartir').onclick=async()=>{
+      const t=textoResumen(r);
+      try{ if(navigator.share){ await navigator.share({title:'Resumen de cobranza',text:t}); return; } }catch(e){ if(e.name==='AbortError') return; }
+      try{ await navigator.clipboard.writeText(t); toast('Resumen copiado. Pégalo donde quieras.'); }catch(e){ toast('No se pudo compartir'); }
+    };
+    cuerpo.querySelector('#rEliminar').onclick=async()=>{
+      if(!await confirmar('Eliminar ruta',`Se borrará del Historial la ruta del <b>${fechaLarga(r.fin)}</b> (${fmt(r.total)}). Tus clientes no se borran. Esto no se puede deshacer.`,'Eliminar ruta','rojo')) return;
+      try{ await DB.borrar('rutas',r.id); }catch(e){ toast('No se pudo eliminar'); return; }
+      rutas=rutas.filter(x=>x.id!==r.id); h.remove(); pintarTotal(); refrescarTab(); toast('Ruta eliminada');
+    };
   };
+  pintar();
+}
+
+/* ---- Corregir errores: cambiar la cantidad, deshacer un cobro o una cancelación ---- */
+function pedirCantidad(nombre,actual){
+  return dialogo({titulo:'Cantidad cobrada',texto:`¿Cuánto te pagó <b>${esc(nombre)}</b>?`,
+    html:`<label class="campo"><span>Cantidad</span><input id="dCant" type="number" inputmode="decimal" min="0" step="any" value="${actual??''}"></label>`,
+    alAbrir:v=>setTimeout(()=>{ const i=v.querySelector('#dCant'); i.focus(); i.select(); },200),
+    botones:[{txt:'Guardar',clase:'verde',valor:v=>{ const n=parseFloat(v.querySelector('#dCant').value); if(!(n>0)){ toast('Escribe la cantidad'); return undefined; } return Math.round(n*100)/100; }},
+      {txt:'Regresar',clase:'claro',valor:null}]});
+}
+async function ponerUltimoPago(id,monto){
+  const x=cliente(id); if(!x) return;
+  const u={...x,ultimoPago:monto}; await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===id)]=u;
+}
+async function revertirPago(cb){
+  const x=cliente(cb.id); if(!x||!cb.antes) return;
+  const u={...x,ultimoPago:cb.antes.ultimoPago};
+  if(u.ultimoPago==null) delete u.ultimoPago;
+  if(!cb.antes.teniaHoy) u.pagos=(x.pagos||[]).filter(d=>d!==fechaISO(new Date(cb.hora)));
+  await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===u.id)]=u;
+}
+async function editarVisita(r,enCurso,k,alCambiar){
+  const x=itemsRuta(r,enCurso).find(i=>i.k===k); if(!x) return;
+  const i=+k.slice(1);
+  const ops=[];
+  if(x.tipo==='cobro'){
+    ops.push({txt:`✏️ Cambiar cantidad (${fmt(x.monto)})`,clase:'oro',valor:'cantidad'});
+    ops.push(enCurso?{txt:'↩️ Deshacer cobro (vuelve a la lista)',clase:'borde',valor:'deshacer'}:{txt:'↩️ Quitar cobro (queda como no visitado)',clase:'borde',valor:'quitar'});
+  } else if(x.tipo==='cancelado'){
+    if(enCurso) ops.push({txt:'↩️ Deshacer cancelación (vuelve a la lista)',clase:'oro',valor:'deshacer'});
+    else { ops.push({txt:'💵 Sí pagó: registrar cobro',clase:'verde',valor:'cobrar'}); ops.push({txt:'↩️ Quitar cancelación (queda como no visitado)',clase:'borde',valor:'quitar'}); }
+  } else if(!enCurso) ops.push({txt:'💵 Sí pagó: registrar cobro',clase:'verde',valor:'cobrar'});
+  else return;
+  ops.push({txt:'Cerrar',clase:'claro',valor:null});
+  const det=x.tipo==='cobro'?`Cobro de <b>${fmt(x.monto)}</b> a las ${hora(x.hora)}`:x.tipo==='cancelado'?`Cancelado: ${esc(x.motivo)}`:'No visitado';
+  const op=await dialogo({titulo:esc(x.nombre),texto:det,botones:ops}); if(!op) return;
+  let aviso='';
+  if(op==='cantidad'){
+    const n=await pedirCantidad(x.nombre,x.monto); if(n==null||n===x.monto) return;
+    r.cobros[i].monto=n; if(x.id) await ponerUltimoPago(x.id,n);
+    aviso=`Corrección: ${n%1?n.toFixed(2):n} (antes ${x.monto})`; toast('Cantidad corregida');
+  }
+  if(op==='deshacer'){
+    const lista=x.tipo==='cobro'?r.cobros:r.cancelados, quitado=lista.splice(i,1)[0];
+    if(x.tipo==='cobro') await revertirPago(quitado);
+    if(x.id&&cliente(x.id)&&!r.pendientes.includes(x.id)) r.pendientes.push(x.id);
+    aviso=x.tipo==='cobro'?'Corrección: anular el reporte de cobro anterior':'Corrección: anular la cancelación anterior';
+    toast(`${x.nombre} regresó a la lista`);
+  }
+  if(op==='quitar'||op==='cobrar'){
+    let n=null; if(op==='cobrar'){ n=await pedirCantidad(x.nombre,(cliente(x.id)||{}).ultimoPago); if(n==null) return; }
+    if(x.tipo==='cobro') r.cobros.splice(i,1);
+    if(x.tipo==='cancelado') r.cancelados.splice(i,1);
+    if(x.tipo==='pendiente'){ r.pendientes.splice(i,1); if(r.pendIds) r.pendIds.splice(i,1); }
+    if(op==='quitar'){ r.pendientes.push(x.nombre); r.pendIds=r.pendIds||[]; r.pendIds[r.pendientes.length-1]=x.id; }
+    else { r.cobros.push({id:x.id,nombre:x.nombre,monto:n,hora:x.hora||r.fin}); if(x.id) await ponerUltimoPago(x.id,n); }
+    toast('Ruta corregida');
+  }
+  if(enCurso) guardarRuta();
+  else { r.total=r.cobros.reduce((s,c)=>s+c.monto,0); try{ await DB.poner('rutas',r); }catch(e){ toast('No se pudo guardar el cambio'); } }
+  pintarTotal(); alCambiar&&alCambiar();
+  // Si ya habías mandado el reporte por WhatsApp, se ofrece mandar la corrección
+  if(enCurso&&aviso&&whatsActivo()&&await confirmar('Avisar en WhatsApp','¿Quieres mandar la corrección por WhatsApp?','Sí, mandar','verde')){
+    const c=cliente(x.id)||{nombre:x.nombre}; await enviarWhats(null,c,aviso);
+  }
+}
+
+/* ---- Cancelar la ruta en curso sin guardarla ---- */
+async function descartarRuta(){
+  const n=R.cobros.length, m=R.cancelados.length;
+  if(!await confirmar('Cancelar ruta',`Se borra lo que llevas de esta ruta${n||m?` (<b>${n}</b> cobro(s) y <b>${m}</b> cancelado(s))`:''} y <b>no se guarda en el Historial</b>.<br><br>Tus clientes y la lista de la ruta se quedan igual, por si quieres volver a iniciarla.`,'Sí, cancelar ruta','rojo')) return;
+  callarVoz(); detenerNavegacion(); mantenerPantalla(false);
+  for(const cb of R.cobros){ try{ await revertirPago(cb); }catch(e){} }
+  const lista=R.lista; R=rutaVacia(); R.lista=lista; guardarRuta(); pintarTotal();
+  cerrarPantallaRuta(); if(tabActual==='ruta') pintarArmado();
+  toast('Ruta cancelada. No se guardó en el Historial.',3500);
 }
 const DIAS_RESPALDO=7;
 function diasSinRespaldo(){ try{ const t=+localStorage.getItem('ga_respaldo'); return t?Math.floor((Date.now()-t)/864e5):null; }catch(e){ return null; } }
