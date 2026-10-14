@@ -130,6 +130,7 @@ a.btn{text-decoration:none}
 .pinNum.actual{background:var(--oro);color:var(--azul);width:36px;height:36px;font-size:15px}
 .pinNum.hecho{background:var(--verde)}
 .pinNum.cancel{background:var(--rojo)}
+.oNum{flex:0 0 auto;min-width:28px;height:28px;border-radius:50%;background:var(--azul);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center}
 .mrInfo{position:absolute;left:10px;right:10px;top:10px;z-index:600;display:flex;gap:6px;flex-wrap:wrap}
 .oItem{display:flex;gap:8px;align-items:center;background:#fff;border-radius:14px;padding:10px 12px;box-shadow:var(--sombra);margin-bottom:8px}
 .oItem .datos{flex:1;min-width:0}
@@ -326,7 +327,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v30';
+const APP_VERSION='v31';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -648,6 +649,8 @@ function abrirHoja(titulo,cuerpoHTML,acciones=''){
   return h;
 }
 
+/* Quita un mapa sin que truene si estaba haciendo zoom en ese momento */
+function quitarMapa(m){ if(!m) return; try{ m.off(); m.stop(); }catch(e){} m._move=function(){ return this; }; m._moveEnd=function(){ return this; }; try{ m.remove(); }catch(e){} }
 function mapaChico(el,pos,arrastrable,alMover){
   if(!hayMapa()){ el.innerHTML='<div class="vacio">El mapa necesita internet la primera vez.</div>'; return null; }
   const centro=pos||CENTRO_DEFECTO;
@@ -1144,10 +1147,36 @@ $('#btnVaciar').onclick=async()=>{ if(await confirmar('Vaciar lista','¿Quitar a
 $('#btnIniciar').onclick=async()=>{
   if(!R.lista.length) return;
   Object.assign(R,{estado:'activa',pendientes:[...R.lista],actual:null,cobros:[],cancelados:[],inicio:new Date().toISOString(),alerta10:false});
-  guardarRuta(); hablar('Iniciamos la ruta de cobranza'); mostrarEleccion();
+  guardarRuta(); hablar('Iniciamos la ruta de cobranza');
+  abrirPantallaRuta(`<div class="cargando"><div class="giro"></div>Armando tu recorrido…</div>`);
+  let pos=posReciente(); if(!pos){ try{ pos=await obtenerPosicion(10000); }catch(e){} }
+  planificarRuta(pos); mostrarEleccion();
 };
 
 /* ================= RUTA EN CURSO ================= */
+/* ---- Orden del recorrido (idea del cobrador): primero el más cercano a ti, luego el más
+   cercano a ese cliente, luego el más cercano al siguiente… uno por uno, en línea recta.
+   Los que no tienen ubicación van al final. ---- */
+function planificarRuta(desde){
+  R.pendientes=R.pendientes.filter(id=>cliente(id));
+  const act=R.actual&&R.pendientes.includes(R.actual)?cliente(R.actual):null;
+  const resto=R.pendientes.filter(id=>!act||id!==act.id);
+  const libres=resto.filter(id=>cliente(id).lat!=null), sinUb=resto.filter(id=>cliente(id).lat==null);
+  // sin GPS se empieza por el primero de tu hoja
+  libres.sort((a,b)=>R.lista.indexOf(a)-R.lista.indexOf(b));
+  let cur=act&&act.lat!=null?act:(desde||null);
+  const orden=[];
+  while(libres.length){
+    let bi=0;
+    if(cur){ let bd=Infinity; libres.forEach((id,i)=>{ const d=distancia(cur,cliente(id)); if(d<bd){ bd=d; bi=i; } }); }
+    const id=libres.splice(bi,1)[0]; orden.push(id); cur=cliente(id);
+  }
+  R.pendientes=[...(act?[act.id]:[]),...orden,...sinUb]; R.plan=true; guardarRuta();
+}
+function yoAhora(){ return (NAV&&NAV.ultimaPos)||posReciente(10*60000); }
+/* Elegiste otro cliente: el recorrido se vuelve a armar desde él */
+function elegirManual(id){ if(!cliente(id)) return; R.actual=id; planificarRuta(yoAhora()); iniciarNavegacion(id); }
+
 const pantallaRuta=$('#ruta');
 let vistaRuta='nav', mapaRuta=null;
 function mostrarPantallaRuta(){
@@ -1161,7 +1190,7 @@ function ocultarPantallaRuta(){ pantallaRuta.classList.add('oculto'); document.b
 function abrirPantallaRuta(html){ $('#rvNav').innerHTML=html; vistaRuta='nav'; mostrarPantallaRuta(); }
 function cerrarPantallaRuta(){
   ocultarPantallaRuta(); $('#rvNav').innerHTML=''; $('#rvOrden').innerHTML='';
-  if(mapaRuta){ try{ mapaRuta.remove(); }catch(e){} mapaRuta=null; } $('#rvMapa').innerHTML=''; vistaRuta='nav';
+  if(mapaRuta){ quitarMapa(mapaRuta); mapaRuta=null; } $('#rvMapa').innerHTML=''; vistaRuta='nav';
 }
 function cambiarVista(v){
   vistaRuta=v;
@@ -1173,7 +1202,7 @@ function cambiarVista(v){
 }
 pantallaRuta.querySelectorAll('.rutaTabs button').forEach(b=>b.onclick=()=>cambiarVista(b.dataset.vista));
 /* Ir con un cliente desde el Mapa o el Orden */
-function irCon(id){ if(id===R.actual && NAV) return cambiarVista('nav'); iniciarNavegacion(id); }
+function irCon(id){ if(id===R.actual && NAV) return cambiarVista('nav'); elegirManual(id); }
 
 /* ---- Vista Mapa: todos los clientes de la ruta ---- */
 function pintarMapaRuta(){
@@ -1198,11 +1227,11 @@ function pintarMapaRuta(){
   R.cobros.forEach(x=>{ const c=cliente(x.id); if(c&&c.lat!=null){ L.marker([c.lat,c.lng],{icon:pin('✓','hecho')}).bindPopup(pop(c,`Cobrado ${fmt(x.monto)}`,false)).addTo(capa); puntos.push([c.lat,c.lng]); } });
   R.cancelados.forEach(x=>{ const c=cliente(x.id); if(c&&c.lat!=null){ L.marker([c.lat,c.lng],{icon:pin('✗','cancel')}).bindPopup(pop(c,esc(x.motivo),false)).addTo(capa); puntos.push([c.lat,c.lng]); } });
   // pendientes (solo los puntos)
-  let sinUb=0;
+  let sinUb=0, num=0;
   R.pendientes.forEach(id=>{ const c=cliente(id); if(!c) return;
     if(c.lat==null){ sinUb++; return; }
-    const act=id===R.actual;
-    L.marker([c.lat,c.lng],{icon:pin('$',act?'actual':''),zIndexOffset:act?800:400}).bindPopup(pop(c,`${act?'En camino · ':''}${c.ultimoPago?fmt(c.ultimoPago):''}${yo&&!act?' · a '+textoDist(distancia(yo,c))+' de ti':''}`,true)).addTo(capa);
+    const act=id===R.actual; num++;
+    L.marker([c.lat,c.lng],{icon:pin(String(num),act?'actual':''),zIndexOffset:act?800:400}).bindPopup(pop(c,`${act?'En camino · ':''}${c.ultimoPago?fmt(c.ultimoPago):''}${yo&&!act?' · a '+textoDist(distancia(yo,c))+' de ti':''}`,true)).addTo(capa);
     puntos.push([c.lat,c.lng]); });
   $('#mrInfo').innerHTML=`<span class="pildora">Por visitar: <b>${R.pendientes.length}</b></span><span class="pildora">Cobrado: <b>${fmt(R.cobros.reduce((s,x)=>s+x.monto,0))}</b></span>${sinUb?`<span class="pildora">${sinUb} sin ubicación</span>`:''}`;
   setTimeout(()=>{ try{ mapaRuta.invalidateSize(false); if(puntos.length) mapaRuta.fitBounds(puntos,{padding:[50,50],maxZoom:16}); else mapaRuta.setView([CENTRO_DEFECTO.lat,CENTRO_DEFECTO.lng],11); }catch(e){} },60);
@@ -1228,24 +1257,34 @@ function pintarOrden(){
   const el=$('#rvOrden');
   const yo=(NAV&&NAV.ultimaPos)||posReciente(10*60000);
   const act=R.actual&&R.pendientes.includes(R.actual)?cliente(R.actual):null;
-  const resto=R.pendientes.filter(id=>id!==R.actual).map(cliente).filter(Boolean)
-    .sort((a,b)=>(a.lat==null)-(b.lat==null) || (yo&&a.lat!=null&&b.lat!=null?distancia(yo,a)-distancia(yo,b):0));
-  const item=c=>`<div class="oItem"><div class="datos"><b>${esc(c.nombre)}</b><small>${c.ultimoPago?fmt(c.ultimoPago):''}${c.lat==null?' · ⚠️ sin ubicación':(yo?' · a '+textoDist(distancia(yo,c))+' de ti':'')}</small></div>
+  // En el orden del recorrido: cada uno es el más cercano al anterior
+  const resto=R.pendientes.filter(id=>id!==R.actual).map(cliente).filter(Boolean);
+  const base=act?1:0;
+  const prev=i=>i>0?resto[i-1]:(act||null);
+  const item=(c,i)=>{ const a=prev(i), d=c.lat==null?null:(a&&a.lat!=null?`a ${textoDist(distancia(a,c))} del anterior`:(yo?`a ${textoDist(distancia(yo,c))} de ti`:''));
+    return `<div class="oItem"><span class="oNum">${c.lat==null?'–':base+i+1}</span><div class="datos"><b>${esc(c.nombre)}</b><small>${c.ultimoPago?fmt(c.ultimoPago):''}${c.lat==null?' · ⚠️ sin ubicación':(d?' · '+d:'')}</small></div>
     <button class="btn rojo" data-cancelar="${c.id}" style="min-height:36px;padding:6px 10px;font-size:13px">Cancelar</button>
-    <button class="btn claro" data-ir="${c.id}" style="min-height:36px;padding:6px 14px;font-size:14px">Ir</button></div>`;
+    <button class="btn claro" data-ir="${c.id}" style="min-height:36px;padding:6px 14px;font-size:14px">Ir</button></div>`; };
   el.innerHTML=`
     <h2 style="margin:0 0 4px">Clientes de la ruta</h2>
-    <p style="margin:0 0 12px;color:var(--suave);font-size:13px">${resto.length} por visitar, del más cercano al más lejano${yo?'':' (activa el GPS para ordenarlos por cercanía)'}. Toca <b>Ir</b> para cambiar de cliente.</p>
-    ${act?`<div class="tarjeta" style="margin-bottom:10px;border-left:6px solid var(--oro);display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><small style="color:var(--suave)">Ahora vas con</small><br><b>${esc(act.nombre)}</b></div>
+    <p style="margin:0 0 12px;color:var(--suave);font-size:13px">${resto.length} por visitar, en el orden de tu recorrido: cada cliente es el más cercano al anterior. Toca <b>Ir</b> para cambiar de cliente (el recorrido se vuelve a armar desde él).</p>
+    ${act?`<div class="tarjeta" style="margin-bottom:10px;border-left:6px solid var(--oro);display:flex;align-items:center;gap:8px"><span class="oNum">1</span><div style="flex:1;min-width:0"><small style="color:var(--suave)">Ahora vas con</small><br><b>${esc(act.nombre)}</b></div>
       <button class="btn rojo" data-cancelar="${act.id}" style="min-height:36px;padding:6px 10px;font-size:13px">Cancelar</button></div>`:''}
     <div id="oLista">${resto.length?resto.map(item).join(''):'<div class="vacio" style="padding:16px">No hay más clientes pendientes.</div>'}</div>
     <button class="btn borde ancho" id="oAgregar" style="margin-top:6px">➕ Agregar otro cliente a la ruta</button>
+    ${resto.length>1?`<button class="btn claro ancho" id="oRearmar" style="margin-top:8px">🔄 Rearmar el recorrido desde donde estoy</button>`:''}
     ${R.cobros.length||R.cancelados.length?`<h3>Ya visitados</h3><p style="margin:-4px 0 8px;color:var(--suave);font-size:13px">¿Te equivocaste? Toca un cliente para corregir la cantidad o deshacerlo.</p>
       <div class="tarjeta">${itemsRuta(R,true).filter(x=>x.tipo!=='pendiente').sort((a,b)=>a.hora.localeCompare(b.hora)).map(x=>renglonVisita(x,false)).join('')}</div>`:''}`;
   el.querySelectorAll('[data-visita]').forEach(b=>b.onclick=()=>editarVisita(R,true,b.dataset.visita,()=>{ pintarOrden(); pintarTotal(); }));
   el.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>irCon(b.dataset.ir));
   el.querySelectorAll('[data-cancelar]').forEach(b=>b.onclick=()=>cancelarSinVisita(cliente(b.dataset.cancelar)));
   $('#oAgregar').onclick=()=>agregarEnRuta(()=>pintarOrden());
+  const rr=$('#oRearmar'); if(rr) rr.onclick=async()=>{
+    rr.disabled=true; rr.textContent='Buscando tu ubicación…';
+    let pos=NAV&&NAV.ultimaPos||posReciente(60000); if(!pos){ try{ pos=await obtenerPosicion(10000); }catch(e){} }
+    if(!pos){ toast('No se pudo leer tu ubicación'); pintarOrden(); return; }
+    planificarRuta(pos); toast('Recorrido armado desde donde estás'); pintarOrden();
+  };
 }
 
 function reanudarRuta(){
@@ -1277,8 +1316,11 @@ async function mostrarEleccion(auto=false){
     conUb.forEach(c=>{ if(info[c.id].seg==null) info[c.id].seg=estimarSegundos(info[c.id].m); });
     cand.sort((a,b)=>info[a.id].seg-info[b.id].seg); conUb.splice(0,cand.length,...cand);
   }
-  const top=pos?conUb.slice(0,3):[];
-  // Al terminar con un cliente se sigue solo con el más cercano
+  // Rutas iniciadas antes de esta versión: se arma el recorrido ahora
+  if(!R.plan) planificarRuta(pos);
+  const sigPlan=cliente(R.pendientes.find(id=>cliente(id).lat!=null));
+  const top=sigPlan?[sigPlan,...conUb.filter(c=>c!==sigPlan)].slice(0,pos?3:1):[];
+  // Al terminar con un cliente se sigue con el que toca en el recorrido
   if(auto && top.length){
     const sig=top[0];
     toast(`Siguiente: ${sig.nombre}${info[sig.id]?' · '+textoDist(info[sig.id].m):''}`,3500);
@@ -1287,7 +1329,7 @@ async function mostrarEleccion(auto=false){
   }
   const cobrado=R.cobros.reduce((s,c)=>s+c.monto,0);
   const tarjeta=(c,primera)=>`<button class="opcion ${primera?'primera':''}" data-ir="${c.id}">${miniatura(c)}
-      <div class="datos">${primera?'<span class="chip oro">El más cercano</span>':''}<b>${esc(c.nombre)}</b>
+      <div class="datos">${primera?'<span class="chip oro">Sigue en tu recorrido</span>':''}<b>${esc(c.nombre)}</b>
       <small>${info[c.id]?`${textoDist(info[c.id].m)} · aprox. ${textoMin(info[c.id].seg)}`:(c.lat==null?'Sin ubicación registrada':'')}</small></div>
       <span class="ir">Ir</span></button>`;
   const resto=[...conUb.filter(c=>!top.includes(c)),...sinUb];
@@ -1302,7 +1344,7 @@ async function mostrarEleccion(auto=false){
     <button class="btn rojo ancho" id="btnTerminar" style="margin-top:14px">Terminar ruta</button>
     <button class="btn borde ancho" id="btnDescartar" style="margin-top:8px">🗑️ Cancelar ruta (no guardar)</button>
   </div>`);
-  pantallaRuta.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>iniciarNavegacion(b.dataset.ir));
+  pantallaRuta.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>elegirManual(b.dataset.ir));
   const bo=$('#btnOtro'); if(bo) bo.onclick=()=>{ $('#listaOtros').classList.toggle('oculto'); };
   $('#btnTerminar').onclick=terminarRutaManual;
   $('#btnDescartar').onclick=descartarRuta;
@@ -1681,7 +1723,7 @@ function detenerNavegacion(){
   if(!NAV) return;
   clearTimeout(NAV.revisa);
   if(NAV.watch!=null && navigator.geolocation) navigator.geolocation.clearWatch(NAV.watch);
-  if(NAV.map) NAV.map.remove();
+  if(NAV.map) quitarMapa(NAV.map);
   NAV=null;
 }
 
@@ -1824,7 +1866,7 @@ function agregarEnRuta(alTerminar){
       inp.addEventListener('input',pintar); setTimeout(()=>inp.focus(),250);
     },
     botones:[{txt:'Listo',clase:'oro',valor:true}]
-  }).then(()=>{ if(agregados&&alTerminar) alTerminar(); });
+  }).then(()=>{ if(agregados){ planificarRuta(yoAhora()); if(alTerminar) alTerminar(); } });
 }
 
 async function finalizarRuta(){
@@ -1953,7 +1995,7 @@ async function editarVisita(r,enCurso,k,alCambiar){
   if(op==='deshacer'){
     const lista=x.tipo==='cobro'?r.cobros:r.cancelados, quitado=lista.splice(i,1)[0];
     if(x.tipo==='cobro') await revertirPago(quitado);
-    if(x.id&&cliente(x.id)&&!r.pendientes.includes(x.id)) r.pendientes.push(x.id);
+    if(x.id&&cliente(x.id)&&!r.pendientes.includes(x.id)){ r.pendientes.push(x.id); if(enCurso) planificarRuta(yoAhora()); }
     aviso=x.tipo==='cobro'?'Corrección: anular el reporte de cobro anterior':'Corrección: anular la cancelación anterior';
     toast(`${x.nombre} regresó a la lista`);
   }
