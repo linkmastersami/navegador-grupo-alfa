@@ -327,7 +327,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v31';
+const APP_VERSION='v32';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -1071,26 +1071,41 @@ function mostrarResultadosFoto(h,res){
     if(usados.has(c.c.id)){ r.repetido=true; sel[i]=null; return; }   // la misma persona viene dos veces en la hoja
     if(c.p>=0.6){ sel[i]=c.c.id; usados.add(c.c.id); } else sel[i]=null;
   });
+  // Grupos (se fijan al abrir para que nada brinque de lugar mientras corriges):
+  // primero los que hay que revisar, luego los que no están en tus clientes, al final los que salieron bien
+  filas.forEach((r,i)=>{
+    const c=sel[i]&&cliente(sel[i]);
+    r.grupo=!r.cands.length?'nuevo':(r.repetido||!sel[i]||r.cands[0].p<0.6||faltanEn(r.texto,c)||c.lat==null)?'revisar':'ok';
+  });
+  let verOk=!filas.some(r=>r.grupo!=='ok');
   const pintar=()=>{
     const n=new Set(Object.values(sel).filter(id=>id&&!R.lista.includes(id))).size;
-    const conCliente=filas.filter(r=>r.cands.length).length;
-    cont.innerHTML=`<p style="margin:0 0 12px;color:var(--suave)">Leí <b>${filas.length}</b> nombre(s)${conCliente<filas.length?` · ${filas.length-conCliente} no están en tus clientes`:''}. Revisa cada uno:</p>
-      ${filas.map((r,i)=>{
+    const cuenta=g=>filas.filter(r=>r.grupo===g).length;
+    const tarjeta=(r,i)=>{
         const elegido=sel[i]&&cliente(sel[i]);
         const elegidoC=sel[i]&&r.cands.find(x=>x.c.id===sel[i]);
-        const etiqueta=r.repetido?' <span class="chip oro">Repetido en la foto</span>':(r.nuevo?' <span class="chip verde">Cliente nuevo</span>':(!r.cands.length?' <span class="chip rojo">No está en tus clientes</span>':((r.cands[0].p<0.6||(elegidoC&&faltanEn(r.texto,cliente(sel[i]))))?' <span class="chip rojo">Revisa</span>':'')));
+        const etiqueta=r.repetido?' <span class="chip oro">Repetido en la '+(res.origen==='lista'?'lista':'foto')+'</span>':(r.nuevo?' <span class="chip verde">Cliente nuevo</span>':(!r.cands.length?' <span class="chip rojo">No está en tus clientes</span>':((r.cands[0].p<0.6||(elegidoC&&faltanEn(r.texto,cliente(sel[i]))))?' <span class="chip rojo">Revisa</span>':(elegido&&elegido.lat==null?' <span class="chip rojo">Sin ubicación</span>':''))));
         const distinto=elegido && norm(elegido.nombre)!==norm(r.texto);
         return `<div class="tarjeta" style="margin-bottom:10px">
         <small style="color:var(--suave)">En la ${res.origen==='lista'?'lista':'foto'} dice: <b style="color:var(--texto)">${esc(r.texto)}</b>${etiqueta}</small>
         ${r.cands.length?`<div class="motivos" style="margin:8px 0 0">${r.cands.map(x=>`<button type="button" data-i="${i}" data-id="${x.c.id}" class="${sel[i]===x.c.id?'sel':''}">${esc(cliente(x.c.id)?cliente(x.c.id).nombre:x.c.nombre)}${(cliente(x.c.id)||x.c).lat==null?' ⚠️':''}${R.lista.includes(x.c.id)?' (ya en ruta)':''}</button>`).join('')}
           <button type="button" data-i="${i}" data-id="" class="${!sel[i]?'sel':''}">Ninguno</button></div>`:''}
         <div class="fila" style="margin-top:8px;flex-wrap:wrap">
+          ${elegido&&elegido.lat==null?`<button class="btn oro" data-ubic="${i}" style="min-height:38px;padding:8px 12px;font-size:14px">📍 Ponerle ubicación</button>`:''}
           ${elegido&&distinto?`<button class="btn claro" data-renombrar="${i}" style="min-height:38px;padding:8px 12px;font-size:14px">✏️ Corregir nombre</button>`:''}
           ${!r.nuevo?`<button class="btn ${r.cands.length?'borde':'oro'}" data-nuevo="${i}" style="min-height:38px;padding:8px 12px;font-size:14px">➕ ${r.cands.length?'Es un cliente nuevo':'Agregar como cliente nuevo'}</button>`:''}
-        </div></div>`;}).join('')}
+        </div></div>`;};
+    const grupo=g=>filas.map((r,i)=>r.grupo===g?tarjeta(r,i):'').join('');
+    const nR=cuenta('revisar'), nN=cuenta('nuevo'), nO=cuenta('ok');
+    cont.innerHTML=`<p style="margin:0 0 12px;color:var(--suave)">Leí <b>${filas.length}</b> nombre(s). Se agregan a la ruta en el mismo orden de tu ${res.origen==='lista'?'lista':'hoja'}.</p>
+      ${nR?`<h3 style="margin:4px 0 8px">⚠️ Por revisar (${nR})</h3>${grupo('revisar')}`:''}
+      ${nN?`<h3 style="margin:14px 0 4px">🆕 No están en tus clientes (${nN})</h3><p style="margin:0 0 8px;color:var(--suave);font-size:13px">Regístralos como clientes nuevos para que entren a la ruta.</p>${grupo('nuevo')}`:''}
+      ${nO?`<details class="grupoOk" ${verOk?'open':''} style="margin:14px 0 12px"><summary style="font-weight:800;padding:8px 0;cursor:pointer">✅ Encontrados sin problema (${nO})${verOk?'':' · toca para ver'}</summary>${grupo('ok')}</details>`:''}
+      ${!nR&&!nN?'<div class="aviso" style="background:#E8F5E9;border-color:#A5D6A7">✅ Todos los nombres se encontraron sin problema.</div>':''}
       <button class="btn oro ancho" id="fIniciar" ${n?'':'disabled'}>Agregar ${n} e iniciar ruta</button>
       <button class="btn claro ancho" id="fAgregar" style="margin-top:8px" ${n?'':'disabled'}>Solo agregar a la lista</button>`;
-    cont.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ sel[b.dataset.i]=b.dataset.id||null; pintar(); });
+    const det=cont.querySelector('.grupoOk'); if(det) det.ontoggle=()=>{ verOk=det.open; };
+    cont.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ sel[b.dataset.i]=b.dataset.id||null; const y=window.scrollY, hs=h.querySelector('.cuerpo'), hy=hs&&hs.scrollTop; pintar(); if(hs) hs.scrollTop=hy; window.scrollTo(0,y); });
     // Cambiar el nombre del cliente elegido por el que viene en la foto (editable)
     cont.querySelectorAll('[data-renombrar]').forEach(b=>b.onclick=async()=>{
       const i=+b.dataset.renombrar, c=cliente(sel[i]); if(!c) return;
@@ -1103,6 +1118,10 @@ function mostrarResultadosFoto(h,res){
       const u={...c,nombre:nuevo,editado:new Date().toISOString()};
       await DB.poner('clientes',u); clientes[clientes.findIndex(x=>x.id===u.id)]=u;
       toast('Nombre actualizado'); pintar();
+    });
+    cont.querySelectorAll('[data-ubic]').forEach(b=>b.onclick=()=>{
+      const c=cliente(sel[+b.dataset.ubic]); if(!c) return;
+      formCliente(c,{_aviso:'Ponle su ubicación: toca el mapa, usa tu ubicación o pega un enlace de Google Maps.'},()=>{ toast('Ubicación guardada'); pintar(); });
     });
     // Registrar a la persona como cliente nuevo, con el nombre de la foto ya escrito
     cont.querySelectorAll('[data-nuevo]').forEach(b=>b.onclick=()=>{
