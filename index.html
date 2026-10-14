@@ -327,7 +327,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v32';
+const APP_VERSION='v33';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -1078,8 +1078,29 @@ function mostrarResultadosFoto(h,res){
     r.grupo=!r.cands.length?'nuevo':(r.repetido||!sel[i]||r.cands[0].p<0.6||faltanEn(r.texto,c)||c.lat==null)?'revisar':'ok';
   });
   let verOk=!filas.some(r=>r.grupo!=='ok');
+  const extras={}, omitidos=new Set();   // familiares que agregas desde aquí (van justo después de su casa)
   const pintar=()=>{
-    const n=new Set(Object.values(sel).filter(id=>id&&!R.lista.includes(id))).size;
+    const todosIds=()=>{ const o=[]; Object.values(sel).forEach(id=>{ if(id&&!o.includes(id)){ o.push(id); (extras[id]||[]).forEach(x=>{ if(!o.includes(x)) o.push(x); }); } }); return o; };
+    const n=todosIds().filter(id=>!R.lista.includes(id)).length;
+    // ---- Misma casa ----
+    const eleg=[...new Set(Object.values(sel).filter(Boolean))].map(cliente).filter(Boolean);
+    const enLista=id=>eleg.some(e=>e.id===id)||R.lista.includes(id)||Object.values(extras).some(a=>a.includes(id));
+    const pares=[]; eleg.forEach((a,i)=>eleg.slice(i+1).forEach(b=>{ if(mismaUbic(a,b)&&!decidido(a,b)) pares.push([a,b]); }));
+    const yaSale=new Set();   // cada persona sale una sola vez aunque esté junto a varios de tu lista
+    const casas=[];
+    eleg.forEach(a=>{ const otros=tambienAqui(a).filter(x=>!yaSale.has(x.id)&&!omitidos.has(x.id)&&!(R.noAgregar||[]).includes(x.id)&&(!enLista(x.id)||(extras[a.id]||[]).includes(x.id)));
+      otros.forEach(o=>yaSale.add(o.id)); if(otros.length) casas.push({a,otros}); });
+    const bt=(attr,txt,clase)=>`<button class="btn ${clase}" ${attr} style="min-height:36px;padding:6px 10px;font-size:13px">${txt}</button>`;
+    const htmlCasa=(pares.length||casas.length)?`<h3 style="margin:4px 0 8px">🏠 Misma casa (${pares.length+casas.length})</h3>
+      ${pares.map(([a,b])=>`<div class="tarjeta" style="margin-bottom:10px;border-left:6px solid var(--oro)">
+        <small style="color:var(--suave)">Están en la misma ubicación${distancia(a,b)>2?` (a ${Math.round(distancia(a,b))} m)`:''}:</small><br><b>${esc(a.nombre)}</b> y <b>${esc(b.nombre)}</b>
+        <div class="fila" style="margin-top:8px;flex-wrap:wrap">${bt(`data-juntar="${a.id},${b.id}"`,'👨‍👩‍👧 Familiares: se cobran juntos','verde')}${bt(`data-separar="${a.id},${b.id}"`,'Cobros diferentes','borde')}</div></div>`).join('')}
+      ${casas.map(({a,otros})=>`<div class="tarjeta" style="margin-bottom:10px;border-left:6px solid var(--oro)">
+        <small style="color:var(--suave)">En la casa de <b style="color:var(--texto)">${esc(a.nombre)}</b> también se cobra a:</small>
+        ${otros.map(x=>{ const ya=(extras[a.id]||[]).includes(x.id), fam=sonFamilia(a,x);
+          return `<div style="padding:8px 0;border-top:1px solid var(--linea);margin-top:8px"><b>${esc(x.nombre)}</b> <small style="color:var(--suave)">${fam?'· familiar':`· a ${Math.round(distancia(a,x))} m`}${x.ultimoPago?' · '+fmt(x.ultimoPago):''}</small>
+          <div class="fila" style="margin-top:6px;flex-wrap:wrap">${ya?`<span class="chip verde" style="align-self:center">✓ Se agrega a la ruta</span>${bt(`data-xquitar="${a.id},${x.id}"`,'Quitar','claro')}`
+            :`${bt(`data-xagregar="${a.id},${x.id}"`,fam?'➕ Agregar a la ruta':'➕ Familiar: agregar','verde')}${bt(`data-xhoyno="${a.id},${x.id}"`,fam?'Hoy no':'Familiar, hoy no','claro')}${fam?'':bt(`data-xsep="${a.id},${x.id}"`,'Cobro diferente','borde')}`}</div></div>`; }).join('')}</div>`).join('')}`:'';
     const cuenta=g=>filas.filter(r=>r.grupo===g).length;
     const tarjeta=(r,i)=>{
         const elegido=sel[i]&&cliente(sel[i]);
@@ -1098,13 +1119,21 @@ function mostrarResultadosFoto(h,res){
     const grupo=g=>filas.map((r,i)=>r.grupo===g?tarjeta(r,i):'').join('');
     const nR=cuenta('revisar'), nN=cuenta('nuevo'), nO=cuenta('ok');
     cont.innerHTML=`<p style="margin:0 0 12px;color:var(--suave)">Leí <b>${filas.length}</b> nombre(s). Se agregan a la ruta en el mismo orden de tu ${res.origen==='lista'?'lista':'hoja'}.</p>
+      ${htmlCasa}
       ${nR?`<h3 style="margin:4px 0 8px">⚠️ Por revisar (${nR})</h3>${grupo('revisar')}`:''}
       ${nN?`<h3 style="margin:14px 0 4px">🆕 No están en tus clientes (${nN})</h3><p style="margin:0 0 8px;color:var(--suave);font-size:13px">Regístralos como clientes nuevos para que entren a la ruta.</p>${grupo('nuevo')}`:''}
       ${nO?`<details class="grupoOk" ${verOk?'open':''} style="margin:14px 0 12px"><summary style="font-weight:800;padding:8px 0;cursor:pointer">✅ Encontrados sin problema (${nO})${verOk?'':' · toca para ver'}</summary>${grupo('ok')}</details>`:''}
-      ${!nR&&!nN?'<div class="aviso" style="background:#E8F5E9;border-color:#A5D6A7">✅ Todos los nombres se encontraron sin problema.</div>':''}
+      ${!nR&&!nN&&!htmlCasa?'<div class="aviso" style="background:#E8F5E9;border-color:#A5D6A7">✅ Todos los nombres se encontraron sin problema.</div>':''}
       <button class="btn oro ancho" id="fIniciar" ${n?'':'disabled'}>Agregar ${n} e iniciar ruta</button>
       <button class="btn claro ancho" id="fAgregar" style="margin-top:8px" ${n?'':'disabled'}>Solo agregar a la lista</button>`;
     const det=cont.querySelector('.grupoOk'); if(det) det.ontoggle=()=>{ verOk=det.open; };
+    const par=b=>b.split(',');
+    cont.querySelectorAll('[data-juntar]').forEach(b=>b.onclick=async()=>{ const [x,y]=par(b.dataset.juntar); await juntarCasa(x,y); toast('Unidos: se cobran en la misma casa'); pintar(); });
+    cont.querySelectorAll('[data-separar]').forEach(b=>b.onclick=async()=>{ const [x,y]=par(b.dataset.separar); await separarCasa(x,y); toast('Listo: son cobros diferentes'); pintar(); });
+    cont.querySelectorAll('[data-xagregar]').forEach(b=>b.onclick=async()=>{ const [a,x]=par(b.dataset.xagregar); if(!sonFamilia(cliente(a),cliente(x))) await juntarCasa(a,x); (extras[a]=extras[a]||[]).push(x); pintar(); });
+    cont.querySelectorAll('[data-xquitar]').forEach(b=>b.onclick=()=>{ const [a,x]=par(b.dataset.xquitar); extras[a]=(extras[a]||[]).filter(y=>y!==x); pintar(); });
+    cont.querySelectorAll('[data-xhoyno]').forEach(b=>b.onclick=async()=>{ const [a,x]=par(b.dataset.xhoyno); if(!sonFamilia(cliente(a),cliente(x))) await juntarCasa(a,x); omitidos.add(x); R.noAgregar=[...(R.noAgregar||[]),x]; guardarRuta(); pintar(); });
+    cont.querySelectorAll('[data-xsep]').forEach(b=>b.onclick=async()=>{ const [a,x]=par(b.dataset.xsep); await separarCasa(a,x); pintar(); });
     cont.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ sel[b.dataset.i]=b.dataset.id||null; const y=window.scrollY, hs=h.querySelector('.cuerpo'), hy=hs&&hs.scrollTop; pintar(); if(hs) hs.scrollTop=hy; window.scrollTo(0,y); });
     // Cambiar el nombre del cliente elegido por el que viene en la foto (editable)
     cont.querySelectorAll('[data-renombrar]').forEach(b=>b.onclick=async()=>{
@@ -1132,7 +1161,7 @@ function mostrarResultadosFoto(h,res){
       });
     });
     cont.querySelector('#fAgregar').onclick=()=>{
-      let k=0; Object.values(sel).forEach(id=>{ if(id&&!R.lista.includes(id)){ R.lista.push(id); k++; } });
+      let k=0; todosIds().forEach(id=>{ if(!R.lista.includes(id)){ R.lista.push(id); k++; } });
       guardarRuta(); h.remove(); pintarArmado(); pintarClientes(); toast(`${k} cliente(s) agregado(s) a la ruta`);
     };
     cont.querySelector('#fIniciar').onclick=()=>{ cont.querySelector('#fAgregar').onclick(); if(R.lista.length) $('#btnIniciar').click(); };
@@ -1165,12 +1194,68 @@ $('#fotoLista').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; if(f
 $('#btnVaciar').onclick=async()=>{ if(await confirmar('Vaciar lista','¿Quitar a todos los clientes de la lista de cobranza?','Vaciar','rojo')){ R.lista=[]; guardarRuta(); pintarArmado(); } };
 $('#btnIniciar').onclick=async()=>{
   if(!R.lista.length) return;
+  await revisarCasasLista();
   Object.assign(R,{estado:'activa',pendientes:[...R.lista],actual:null,cobros:[],cancelados:[],inicio:new Date().toISOString(),alerta10:false});
   guardarRuta(); hablar('Iniciamos la ruta de cobranza');
   abrirPantallaRuta(`<div class="cargando"><div class="giro"></div>Armando tu recorrido…</div>`);
   let pos=posReciente(); if(!pos){ try{ pos=await obtenerPosicion(10000); }catch(e){} }
   planificarRuta(pos); mostrarEleccion();
 };
+
+/* ================= MISMA CASA (familiares que se cobran juntos) =================
+   c.casa: clave que comparten los clientes que se cobran en la misma casa.
+   c.separados: clientes cercanos que ya dijiste que son cobros diferentes. */
+function apellidos(c){ return norm(c.nombre).split(' ').slice(1).filter(t=>t.length>2&&!VACIAS.has(t)); }
+function compartenApellido(a,b){ const B=new Set(apellidos(b)); return apellidos(a).some(t=>B.has(t)); }
+function mismaUbic(a,b){
+  if(!a||!b||a.id===b.id||a.lat==null||b.lat==null) return false;
+  const d=distancia(a,b); return d<=12 || (d<=25&&compartenApellido(a,b));
+}
+function sonFamilia(a,b){ return !!(a&&b&&a.id!==b.id&&a.casa&&a.casa===b.casa); }
+function decidido(a,b){ return sonFamilia(a,b)||(a.separados||[]).includes(b.id)||(b.separados||[]).includes(a.id); }
+function familia(c){ return c&&c.casa?clientes.filter(x=>x.id!==c.id&&x.casa===c.casa):[]; }
+/* Quiénes se cobran también en esa casa: familiares ya unidos y vecinos pegados que aún no decides */
+function tambienAqui(c){ return clientes.filter(x=>sonFamilia(c,x)||(mismaUbic(c,x)&&!decidido(c,x))); }
+async function guardarCli(u){ await DB.poner('clientes',u); const i=clientes.findIndex(y=>y.id===u.id); if(i>=0) clientes[i]=u; else clientes.push(u); }
+async function juntarCasa(aId,bId){
+  const a=cliente(aId), b=cliente(bId); if(!a||!b) return;
+  const clave=a.casa||b.casa||uid();
+  const viejas=new Set([a.casa,b.casa].filter(k=>k&&k!==clave));
+  for(const x of clientes.filter(x=>x.id===a.id||x.id===b.id||viejas.has(x.casa)))
+    await guardarCli({...x,casa:clave,separados:(x.separados||[]).filter(id=>id!==a.id&&id!==b.id)});
+}
+async function separarCasa(aId,bId){
+  const a=cliente(aId), b=cliente(bId); if(!a||!b) return;
+  await guardarCli({...a,separados:[...new Set([...(a.separados||[]),b.id])]});
+  await guardarCli({...b,separados:[...new Set([...(b.separados||[]),a.id])]});
+}
+async function sacarDeCasa(id){ const c=cliente(id); if(!c||!c.casa) return; const u={...c}; delete u.casa; await guardarCli(u); }
+/* Pregunta: ¿familiares o cobros diferentes? */
+async function preguntarCasa(a,b){
+  const d=Math.round(distancia(a,b));
+  const r=await dialogo({titulo:'🏠 Misma ubicación',
+    texto:`<b>${esc(a.nombre)}</b> y <b>${esc(b.nombre)}</b> están en la misma ubicación${d>2?` (a ${d} m)`:''}.<br><br>¿Son familiares que se cobran en la misma casa, o son cobros diferentes?`,
+    botones:[{txt:'👨‍👩‍👧 Familiares: se cobran juntos',clase:'verde',valor:'juntar'},{txt:'Son cobros diferentes',clase:'borde',valor:'separar'},{txt:'Preguntar después',clase:'claro',valor:null}]});
+  if(r==='juntar') await juntarCasa(a.id,b.id);
+  if(r==='separar') await separarCasa(a.id,b.id);
+  return r;
+}
+
+/* Antes de iniciar: clientes de tu lista en la misma ubicación, y familiares que no traes en la lista */
+async function revisarCasasLista(){
+  const ls=()=>R.lista.map(cliente).filter(Boolean);
+  fuera: for(const a of ls()) for(const b of ls()){
+    if(a.id<b.id&&mismaUbic(cliente(a.id),cliente(b.id))&&!decidido(cliente(a.id),cliente(b.id))){ const r=await preguntarCasa(cliente(a.id),cliente(b.id)); if(r==null) break fuera; } }
+  R.noAgregar=R.noAgregar||[];
+  for(const a of ls()){
+    const faltan=familia(a).filter(x=>!R.lista.includes(x.id)&&!R.noAgregar.includes(x.id)); if(!faltan.length) continue;
+    const r=await dialogo({titulo:'🏠 También se cobra aquí',texto:`En la casa de <b>${esc(a.nombre)}</b> también se cobra a: <b>${faltan.map(x=>esc(x.nombre)).join('</b>, <b>')}</b>.<br><br>¿Los agrego a la ruta?`,
+      botones:[{txt:'➕ Sí, agregarlos',clase:'verde',valor:true},{txt:'Hoy no',clase:'claro',valor:false}]});
+    if(r){ const i=R.lista.indexOf(a.id); R.lista.splice(i+1,0,...faltan.map(x=>x.id)); toast(`${faltan.length} agregado(s)`); }
+    else R.noAgregar.push(...faltan.map(x=>x.id));
+  }
+  guardarRuta();
+}
 
 /* ================= RUTA EN CURSO ================= */
 /* ---- Orden del recorrido (idea del cobrador): primero el más cercano a ti, luego el más
@@ -1190,8 +1275,14 @@ function planificarRuta(desde){
     if(cur){ let bd=Infinity; libres.forEach((id,i)=>{ const d=distancia(cur,cliente(id)); if(d<bd){ bd=d; bi=i; } }); }
     const id=libres.splice(bi,1)[0]; orden.push(id); cur=cliente(id);
   }
-  R.pendientes=[...(act?[act.id]:[]),...orden,...sinUb]; R.plan=true; guardarRuta();
+  let todo=[...(act?[act.id]:[]),...orden,...sinUb];
+  // Los familiares de la misma casa quedan uno tras otro (es una sola parada)
+  const fin=[]; todo.forEach(id=>{ if(fin.includes(id)) return; fin.push(id);
+    const c=cliente(id); todo.forEach(o=>{ if(!fin.includes(o)&&sonFamilia(c,cliente(o))) fin.push(o); }); });
+  R.pendientes=fin; R.plan=true; guardarRuta();
 }
+/* Familiares pendientes que se cobran en la misma parada */
+function grupoParada(c){ return [c,...R.pendientes.filter(id=>id!==c.id).map(cliente).filter(x=>sonFamilia(c,x))]; }
 function yoAhora(){ return (NAV&&NAV.ultimaPos)||posReciente(10*60000); }
 /* Elegiste otro cliente: el recorrido se vuelve a armar desde él */
 function elegirManual(id){ if(!cliente(id)) return; R.actual=id; planificarRuta(yoAhora()); iniciarNavegacion(id); }
@@ -1396,7 +1487,7 @@ function iniciarNavegacion(id,reanudando=false){
     </div>
     <div id="banner" class="oculto"><div class="t" id="bannerTxt"></div><button class="btn claro" id="bannerX" style="min-height:36px;padding:6px 10px">OK</button></div>
     <div class="panelNav">
-      <div class="destino">${miniatura(c)}<div class="datos"><b>${esc(c.nombre)}</b>
+      <div class="destino">${miniatura(c)}<div class="datos"><b>${esc(c.nombre)}</b>${grupoParada(c).length>1?`<small style="display:block;color:var(--suave)">🏠 También: ${grupoParada(c).slice(1).map(x=>esc(x.nombre)).join(', ')}</small>`:''}
         <div class="eta">${sinUb?'<span>Este cliente no tiene ubicación registrada</span>':'<span><strong id="nMin">…</strong> </span><span id="nDist"></span>'}</div>
         ${c.referencia?`<small style="color:var(--suave)">${esc(c.referencia)}</small>`:''}</div></div>
       <div class="fila" style="margin-bottom:8px">
@@ -1749,8 +1840,10 @@ function detenerNavegacion(){
 async function llegada(c,manual){
   if(!NAV||NAV.llegado) return;
   NAV.llegado=true;
-  if(!manual){ campana(); hablar(`Llegamos al destino. ¿Te pagó ${c.nombre}?`); }
+  const grupo=grupoParada(cliente(c.id)||c);
+  if(!manual){ campana(); hablar(grupo.length>1?`Llegamos a la casa de ${c.nombre}. Aquí se cobra a ${grupo.length} personas.`:`Llegamos al destino. ¿Te pagó ${c.nombre}?`); }
   else { await ofrecerGuardarAqui(c); c=cliente(c.id)||c; }
+  if(grupo.length>1) return llegadaCasa(c,grupo);
   const r=await dialogo({
     titulo:'📍 Llegamos al destino', texto:`¿Te pagó <b>${esc(c.nombre)}</b>?`,
     html:`<div id="dFotoCaja" style="margin-bottom:10px"></div>
@@ -1758,6 +1851,23 @@ async function llegada(c,manual){
       <label class="campo"><span>Cantidad cobrada${c.ultimoPago?' <span class="opcional">(la de su último pago; cámbiala si pagó otra)</span>':''}</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${esc(c.ultimoPago||'')}"></label>
       <input type="file" id="dFotoIn" accept="image/*" capture="environment" class="oculto">`,
     alAbrir:v=>{
+      prepararFotoTel(v,c);
+      // Si no hay cantidad sugerida, el cursor queda listo para escribirla
+      if(!c.ultimoPago) setTimeout(()=>{ const x=v.querySelector('#dMonto'); x.focus(); x.select(); },250);
+    },
+    botones:[
+      {txt:'Sí, registrar cobro',clase:'verde',valor:v=>{ const n=parseFloat(String(v.querySelector('#dMonto').value).replace(/[^0-9.]/g,''));
+          if(!(n>0)){ toast('Escribe la cantidad que te pagó'); return undefined; } return {pago:n}; }},
+      {txt:'No pagó (cancelar cobro)',clase:'rojo',valor:{noPago:true}},
+      {txt:'Aún no llego, seguir navegando',clase:'claro',valor:{seguir:true}}
+    ]});
+  if(r.pago){ registrarCobro(c,r.pago); return; }
+  if(r.noPago){ const m=await pedirMotivo(c.nombre); if(m){ cancelarCobro(c,m); return; } }
+  if(NAV){ NAV.llegado=false; NAV.pausaLlegada=Date.now()+90000; }
+}
+
+/* Foto de la fachada y botón de llamar dentro de la ventana de llegada */
+function prepararFotoTel(v,c){
       // Foto de la fachada: se muestra para ubicar la casa, o se toma si no tiene
       const pintarFoto=()=>{ const x=cliente(c.id)||c, caja=v.querySelector('#dFotoCaja');
         caja.innerHTML=x.foto?`<img class="foto" src="${x.foto}" alt="Fachada" style="max-height:30vh;cursor:zoom-in"><small style="display:block;color:var(--suave);margin-top:4px">Toca la foto para verla en grande · <a href="#" id="dFotoCambiar">cambiar foto</a></small>`
@@ -1777,18 +1887,62 @@ async function llegada(c,manual){
           caja.querySelector('#dTelOk').onclick=async()=>{ const tel=inp.value.trim(); if(!tel){ toast('Escribe el teléfono'); return; }
             const u={...(cliente(c.id)||c),telefono:tel,editado:new Date().toISOString()}; await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===u.id)]=u; toast('Teléfono guardado'); pintarTel(); }; }; };
       pintarFoto(); pintarTel();
-      // Si no hay cantidad sugerida, el cursor queda listo para escribirla
-      if(!c.ultimoPago) setTimeout(()=>{ const x=v.querySelector('#dMonto'); x.focus(); x.select(); },250);
-    },
+}
+/* Llegada a una casa donde se cobra a varios familiares: una cantidad por cada uno */
+async function llegadaCasa(c,grupo){
+  const filas=grupo.map((x,i)=>`<div class="tarjeta" style="padding:10px 12px;margin-bottom:8px" data-k="${i}">
+      <b>${esc(x.nombre)}</b>
+      <div class="fila" style="margin-top:6px;align-items:center">
+        <input class="monto dMontoC" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${esc(x.ultimoPago||'')}" style="flex:1;min-width:0;border:1.5px solid var(--linea);border-radius:12px;padding:10px 12px;font:inherit;font-size:20px;font-weight:800">
+        <label style="display:flex;gap:6px;align-items:center;font-size:14px;white-space:nowrap"><input type="checkbox" class="dNoPago"> No pagó</label>
+      </div></div>`).join('');
+  const r=await dialogo({
+    titulo:'📍 Llegamos a la casa', texto:`Aquí se cobra a <b>${grupo.length}</b> personas. Escribe cuánto pagó cada una (o marca <b>No pagó</b>).`,
+    html:`<div id="dFotoCaja" style="margin-bottom:10px"></div><div class="fila" id="dTelCaja" style="margin-bottom:12px"></div>${filas}
+      <input type="file" id="dFotoIn" accept="image/*" capture="environment" class="oculto">`,
+    alAbrir:v=>{ prepararFotoTel(v,c);
+      v.querySelectorAll('[data-k]').forEach(t=>{ const chk=t.querySelector('.dNoPago'), inp=t.querySelector('.dMontoC');
+        chk.onchange=()=>{ inp.disabled=chk.checked; inp.style.opacity=chk.checked?.4:1; }; }); },
     botones:[
-      {txt:'Sí, registrar cobro',clase:'verde',valor:v=>{ const n=parseFloat(String(v.querySelector('#dMonto').value).replace(/[^0-9.]/g,''));
-          if(!(n>0)){ toast('Escribe la cantidad que te pagó'); return undefined; } return {pago:n}; }},
-      {txt:'No pagó (cancelar cobro)',clase:'rojo',valor:{noPago:true}},
+      {txt:'Registrar',clase:'verde',valor:v=>{ const out=[];
+        for(const t of v.querySelectorAll('[data-k]')){ const x=grupo[+t.dataset.k];
+          if(t.querySelector('.dNoPago').checked){ out.push({c:x,noPago:true}); continue; }
+          const n=parseFloat(String(t.querySelector('.dMontoC').value).replace(/[^0-9.]/g,''));
+          if(!(n>0)){ toast(`Escribe cuánto pagó ${x.nombre} o marca "No pagó"`); return undefined; }
+          out.push({c:x,monto:Math.round(n*100)/100}); }
+        return {res:out}; }},
       {txt:'Aún no llego, seguir navegando',clase:'claro',valor:{seguir:true}}
     ]});
-  if(r.pago){ registrarCobro(c,r.pago); return; }
-  if(r.noPago){ const m=await pedirMotivo(c.nombre); if(m){ cancelarCobro(c,m); return; } }
+  if(r.res){
+    for(const x of r.res) if(x.noPago){ const m=await pedirMotivo(x.c.nombre); if(!m){ return llegadaCasa(c,grupo); } x.motivo=m; }
+    return registrarCasa(r.res);
+  }
   if(NAV){ NAV.llegado=false; NAV.pausaLlegada=Date.now()+90000; }
+}
+/* Registra a todos los de la casa y manda un solo reporte de WhatsApp:
+   Ubicación / Nombre / cantidad / Nombre / cantidad… */
+async function registrarCasa(res){
+  const pos=posicionReporte(), ahora=new Date().toISOString(), hoy=fechaISO(new Date());
+  for(const x of res){
+    const k=cliente(x.c.id)||x.c;
+    if(x.noPago) R.cancelados.push({id:k.id,nombre:k.nombre,motivo:x.motivo,hora:ahora});
+    else R.cobros.push({id:k.id,nombre:k.nombre,monto:x.monto,hora:ahora,antes:{ultimoPago:k.ultimoPago??null,teniaHoy:(k.pagos||[]).includes(hoy)}});
+  }
+  const ids=res.map(x=>x.c.id);
+  R.pendientes=R.pendientes.filter(id=>!ids.includes(id)); R.actual=null; guardarRuta(); pintarTotal();
+  const total=res.reduce((t,x)=>t+(x.monto||0),0), pagaron=res.filter(x=>!x.noPago).length;
+  pantallaRegistrado(pagaron?`Cobro de ${fmt(total)} registrado`:'Cobros cancelados',res.map(x=>x.c.nombre).join(' · '));
+  for(const x of res) if(!x.noPago) await recordarPago(x.c,x.monto);
+  if(whatsActivo()){
+    const p=await pos, lineas=[];
+    if(p) lineas.push(`https://maps.google.com/?q=${p.lat.toFixed(7)},${p.lng.toFixed(7)}`);
+    res.forEach(x=>lineas.push(x.c.nombre,x.noPago?x.motivo:String(x.monto%1?x.monto.toFixed(2):x.monto)));
+    const texto=lineas.join('\n');
+    try{ if(navigator.share){ await navigator.share({text:texto}); await esperarRegreso(); } else { window.open('https://wa.me/?text='+encodeURIComponent(texto),'_blank'); await esperarRegreso(); } }
+    catch(e){}
+  }
+  hablar(pagaron?`Cobro de ${Math.round(total)} pesos registrado, ${pagaron} de ${res.length} personas.`:'Cobros cancelados.');
+  mostrarEleccion(true);
 }
 
 /* Foto de la fachada en pantalla completa */
