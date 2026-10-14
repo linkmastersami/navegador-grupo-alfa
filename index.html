@@ -327,7 +327,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v33';
+const APP_VERSION='v34';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -1207,9 +1207,10 @@ $('#btnIniciar').onclick=async()=>{
    c.separados: clientes cercanos que ya dijiste que son cobros diferentes. */
 function apellidos(c){ return norm(c.nombre).split(' ').slice(1).filter(t=>t.length>2&&!VACIAS.has(t)); }
 function compartenApellido(a,b){ const B=new Set(apellidos(b)); return apellidos(a).some(t=>B.has(t)); }
+const CASA_METROS=5;   // a esta distancia o menos se considera la misma casa (margen del GPS)
 function mismaUbic(a,b){
   if(!a||!b||a.id===b.id||a.lat==null||b.lat==null) return false;
-  const d=distancia(a,b); return d<=12 || (d<=25&&compartenApellido(a,b));
+  return distancia(a,b)<=CASA_METROS;   // solo la ubicación, sin importar el apellido
 }
 function sonFamilia(a,b){ return !!(a&&b&&a.id!==b.id&&a.casa&&a.casa===b.casa); }
 function decidido(a,b){ return sonFamilia(a,b)||(a.separados||[]).includes(b.id)||(b.separados||[]).includes(a.id); }
