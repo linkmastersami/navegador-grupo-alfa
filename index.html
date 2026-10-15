@@ -332,7 +332,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v38';
+const APP_VERSION='v39';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -734,6 +734,7 @@ function formCliente(existente=null,inicial={},alGuardar=null){
     c.editado=new Date().toISOString();
     await DB.poner('clientes',c);
     const i=clientes.findIndex(x=>x.id===c.id); if(i>=0) clientes[i]=c; else clientes.push(c);
+    if(existente&&R.destinos&&(existente.lat!==c.lat||existente.lng!==c.lng)){ delete R.destinos[c.id]; guardarRuta(); }
     h.remove(); alCambiarCliente(c.id);
     if(alGuardar){ alGuardar(c); return; }
     document.querySelectorAll('.hoja').forEach(x=>x.remove());
@@ -1286,15 +1287,21 @@ async function revisarCasasLista(){
    cercano a ese cliente, luego el más cercano al siguiente… uno por uno, en línea recta.
    Los que no tienen ubicación van al final. ---- */
 function planificarRuta(desde){
-  R.pendientes=R.pendientes.filter(id=>cliente(id));
+  R.pendientes=R.pendientes.filter(id=>clienteRuta(id));
   limpiarUniones();
-  const act=R.actual&&R.pendientes.includes(R.actual)?cliente(R.actual):null;
+  const act=R.actual&&R.pendientes.includes(R.actual)?clienteRuta(R.actual):null;
   const resto=R.pendientes.filter(id=>!act||id!==act.id);
-  const libres=resto.filter(id=>cliente(id).lat!=null), sinUb=resto.filter(id=>cliente(id).lat==null);
+  const libres=resto.filter(id=>clienteRuta(id).lat!=null), sinUb=resto.filter(id=>clienteRuta(id).lat==null);
   // sin GPS se empieza por el primero de tu hoja
   libres.sort((a,b)=>R.lista.indexOf(a)-R.lista.indexOf(b));
   const orden=cadenaCercana(act&&act.lat!=null?act:(desde||null),libres);
   R.pendientes=juntarFamilias([...(act?[act.id]:[]),...orden,...sinUb]); R.plan=true; guardarRuta();
+}
+/* Cliente con el destino de hoy (si pidió que pasaras a otro lugar solo por hoy).
+   Es una copia: nunca se guarda. */
+function clienteRuta(id){
+  const c=cliente(id), d=c&&R.destinos&&R.destinos[id];
+  return d?{...c,lat:d.lat,lng:d.lng,destinoHoy:true}:c;
 }
 /* Siempre el más cercano al anterior, uno por uno.
    Respeta las uniones que hiciste en el mapa (R.uniones: después de A va B). */
@@ -1308,9 +1315,9 @@ function cadenaCercana(cur,ids){
       // quien va unido después de otro cliente que aún falta, espera su turno
       const ok=libres.filter(x=>!(fuente[x]&&libres.includes(fuente[x])));
       const pool=ok.length?ok:libres; id=pool[0];
-      if(cur){ let bd=Infinity; pool.forEach(x=>{ const d=distancia(cur,cliente(x)); if(d<bd){ bd=d; id=x; } }); }
+      if(cur){ let bd=Infinity; pool.forEach(x=>{ const d=distancia(cur,clienteRuta(x)); if(d<bd){ bd=d; id=x; } }); }
     }
-    libres.splice(libres.indexOf(id),1); orden.push(id); cur=cliente(id);
+    libres.splice(libres.indexOf(id),1); orden.push(id); cur=clienteRuta(id);
   }
   return orden;
 }
@@ -1335,13 +1342,13 @@ function juntarFamilias(todo){
 /* Acomodo a mano en el mapa: después de "desde" va "hacia", y lo que sigue se vuelve a armar a partir de "hacia".
    Lo que estaba antes de "desde" no se mueve. */
 function moverEnRecorrido(desdeId,haciaId){
-  const P=R.pendientes.filter(id=>cliente(id)), i=P.indexOf(desdeId);
+  const P=R.pendientes.filter(id=>clienteRuta(id)), i=P.indexOf(desdeId);
   if(i<0||desdeId===haciaId||!P.includes(haciaId)||haciaId===R.actual) return false;
   unir(desdeId,haciaId);
   const fijos=P.slice(0,i+1).filter(id=>id!==haciaId);
   const resto=P.filter(id=>!fijos.includes(id)&&id!==haciaId);
-  const conUb=resto.filter(id=>cliente(id).lat!=null), sinUb=resto.filter(id=>cliente(id).lat==null);
-  R.pendientes=juntarFamilias([...fijos,haciaId,...cadenaCercana(cliente(haciaId),conUb),...sinUb]); guardarRuta();
+  const conUb=resto.filter(id=>clienteRuta(id).lat!=null), sinUb=resto.filter(id=>clienteRuta(id).lat==null);
+  R.pendientes=juntarFamilias([...fijos,haciaId,...cadenaCercana(clienteRuta(haciaId),conUb),...sinUb]); guardarRuta();
   return true;
 }
 /* Familiares pendientes que se cobran en la misma parada */
@@ -1393,19 +1400,29 @@ function pintarMapaRuta(sinEncuadre){
   const puntos=[];
   const yo=(NAV&&NAV.ultimaPos)||posReciente(10*60000);
   if(yo){ L.marker([yo.lat,yo.lng],{icon:iconoYo(),zIndexOffset:900}).addTo(capa); puntos.push([yo.lat,yo.lng]); }
-  const pop=(c,extra,boton)=>{ const div=document.createElement('div'); div.style.minWidth='170px';
-    div.innerHTML=`<b>${esc(c.nombre)}</b><br><small>${extra}</small>`;
-    if(boton){ const b=document.createElement('button'); b.className='btn oro'; b.style.cssText='min-height:36px;margin-top:8px;width:100%;font-size:14px'; b.textContent=c.id===R.actual?'Ver navegación':'Ir con este cliente'; b.onclick=()=>irCon(c.id); div.appendChild(b); }
+  const pop=(c,extra,boton)=>{ const div=document.createElement('div'); div.style.cssText='min-width:200px;max-width:240px';
+    const x=cliente(c.id)||c;
+    div.innerHTML=`<b>${esc(x.nombre)}</b><br><small>${extra}${c.destinoHoy?'<br>📍 <b>Destino solo por hoy</b>':''}</small>
+      ${x.foto?`<img src="${x.foto}" alt="Fachada" style="display:block;width:100%;max-height:150px;object-fit:cover;border-radius:10px;margin-top:8px;cursor:zoom-in">`:''}`;
+    const img=div.querySelector('img'); if(img) img.onclick=()=>verFotoGrande(cliente(c.id));
+    if(boton){
+      const fila=document.createElement('div'); fila.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin-top:8px';
+      const bt=(txt,clase,fn)=>{ const b=document.createElement(fn.href?'a':'button'); b.className='btn '+clase; b.style.cssText='min-height:34px;padding:4px 8px;font-size:13px;flex:1;white-space:nowrap'; b.textContent=txt; if(fn.href) b.href=fn.href; else b.onclick=fn; fila.appendChild(b); };
+      bt('✏️ Editar','claro',()=>{ mapaRuta.closePopup(); formCliente(cliente(c.id),{},()=>{ toast('Cliente actualizado'); if(vistaRuta==='mapa') pintarMapaRuta(true); }); });
+      if(x.telefono) bt('📞 Llamar','claro',{href:'tel:'+x.telefono});
+      bt('📍 Editar destino','oro',()=>{ mapaRuta.closePopup(); editarDestino(x); });
+      div.appendChild(fila);
+    }
     return div; };
   // ya visitados
-  R.cobros.forEach(x=>{ const c=cliente(x.id); if(c&&c.lat!=null){ L.marker([c.lat,c.lng],{icon:pin('✓','hecho')}).bindPopup(pop(c,`Cobrado ${fmt(x.monto)}`,false)).addTo(capa); puntos.push([c.lat,c.lng]); } });
-  R.cancelados.forEach(x=>{ const c=cliente(x.id); if(c&&c.lat!=null){ L.marker([c.lat,c.lng],{icon:pin('✗','cancel')}).bindPopup(pop(c,esc(x.motivo),false)).addTo(capa); puntos.push([c.lat,c.lng]); } });
+  R.cobros.forEach(x=>{ const c=clienteRuta(x.id); if(c&&c.lat!=null){ L.marker([c.lat,c.lng],{icon:pin('✓','hecho')}).bindPopup(()=>pop(c,`Cobrado ${fmt(x.monto)}`,false)).addTo(capa); puntos.push([c.lat,c.lng]); } });
+  R.cancelados.forEach(x=>{ const c=clienteRuta(x.id); if(c&&c.lat!=null){ L.marker([c.lat,c.lng],{icon:pin('✗','cancel')}).bindPopup(()=>pop(c,esc(x.motivo),false)).addTo(capa); puntos.push([c.lat,c.lng]); } });
   // pendientes (solo los puntos)
   let sinUb=0, num=0; const marcas=[], linea=[];
-  R.pendientes.forEach(id=>{ const c=cliente(id); if(!c) return;
+  R.pendientes.forEach(id=>{ const c=clienteRuta(id); if(!c) return;
     if(c.lat==null){ sinUb++; return; }
     const act=id===R.actual; num++;
-    const m=L.marker([c.lat,c.lng],{icon:pin(String(num),act?'actual':''),zIndexOffset:act?800:400}).bindPopup(pop(c,`${act?'En camino · ':''}${c.ultimoPago?fmt(c.ultimoPago):''}${yo&&!act?' · a '+textoDist(distancia(yo,c))+' de ti':''}`,true)).addTo(capa);
+    const m=L.marker([c.lat,c.lng],{icon:pin(String(num),act?'actual':''),zIndexOffset:act?800:400}).bindPopup(()=>pop(c,`${act?'En camino · ':''}${c.ultimoPago?fmt(c.ultimoPago):''}${yo&&!act?' · a '+textoDist(distancia(yo,c))+' de ti':''}`,true)).addTo(capa);
     m._id=id; m._num=num; marcas.push(m); linea.push([c.lat,c.lng]);
     puntos.push([c.lat,c.lng]); });
   // En modo acomodar: línea del recorrido y arrastre de un número a otro
@@ -1454,6 +1471,34 @@ function prepararArrastre(m,marcas,capa){
   });
 }
 
+/* ---- Editar destino: el cliente pidió que pasaras a otro lugar ----
+   Se guarda como su nueva ubicación o solo para la ruta de hoy. */
+async function editarDestino(c){
+  c=cliente(c.id); if(!c) return;
+  const ahora=clienteRuta(c.id); let p=null;
+  const r=await dialogo({titulo:'📍 Editar destino',texto:`¿A dónde vas a ir con <b>${esc(c.nombre)}</b>? Toca el mapa o arrastra el pin.`,
+    html:`<div id="dDestMapa" style="height:240px;border-radius:12px;overflow:hidden;margin-bottom:8px"></div>
+      <div class="fila" style="margin-bottom:4px"><button type="button" class="btn claro" id="dDestGPS" style="flex:1;font-size:14px">📍 Mi ubicación</button><button type="button" class="btn claro" id="dDestEnl" style="flex:1;font-size:14px">🔗 Pegar enlace</button></div>`,
+    alAbrir:v=>{
+      const mc=mapaChico(v.querySelector('#dDestMapa'),ahora.lat!=null?{lat:ahora.lat,lng:ahora.lng}:null,true,q=>{ p=q; });
+      v.querySelector('#dDestGPS').onclick=async()=>{ try{ const q=await obtenerPosicion(); p={lat:q.lat,lng:q.lng}; mc&&mc.poner(p); }catch(e){ toast(e.message,4000); } };
+      v.querySelector('#dDestEnl').onclick=async()=>{
+        const t=await dialogo({titulo:'Pegar ubicación',texto:'Pega un enlace de Google Maps o coordenadas.',html:'<label class="campo"><input id="dEnl" placeholder="Pega aquí…"></label>',
+          botones:[{txt:'Usar',clase:'oro',valor:w=>w.querySelector('#dEnl').value},{txt:'Cancelar',clase:'claro',valor:null}]});
+        if(!t) return; const q=await coordsDeTexto(t);
+        if(q){ p={lat:q.lat,lng:q.lng}; mc&&mc.poner(p); } else toast('Ese enlace no trae la ubicación. Toca el mapa.',4000); };
+    },
+    botones:[{txt:'Usar este destino',clase:'oro',valor:()=>{ if(!p){ toast('Marca el nuevo destino en el mapa'); return undefined; } return p; }},{txt:'Cancelar',clase:'claro',valor:null}]});
+  if(!r) return;
+  const como=await dialogo({titulo:'¿Cómo guardo el destino?',texto:`¿Esta es la <b>nueva ubicación</b> de ${esc(c.nombre)}, o solo vas ahí <b>por hoy</b>?`,
+    botones:[{txt:'🏠 Es su nueva ubicación',clase:'oro',valor:'siempre'},{txt:'📅 Solo por hoy',clase:'borde',valor:'hoy'},{txt:'Cancelar',clase:'claro',valor:null}]});
+  if(!como) return;
+  if(como==='siempre'){ await guardarUbicacion(c,r); toast('Ubicación del cliente actualizada'); }
+  else { R.destinos=R.destinos||{}; R.destinos[c.id]={lat:r.lat,lng:r.lng}; planificarRuta(yoAhora()); toast('Destino cambiado solo por hoy'); }
+  if(R.actual===c.id&&NAV) iniciarNavegacion(c.id,true);
+  if(vistaRuta==='mapa') pintarMapaRuta(true); else if(vistaRuta==='orden') pintarOrden();
+}
+
 /* ---- Cancelar un cobro sin ir (el cliente avisó por teléfono) ----
    El reporte de WhatsApp va sin ubicación porque no estás en su casa. */
 async function cancelarSinVisita(c){
@@ -1475,9 +1520,9 @@ async function cancelarSinVisita(c){
 function pintarOrden(){
   const el=$('#rvOrden');
   const yo=(NAV&&NAV.ultimaPos)||posReciente(10*60000);
-  const act=R.actual&&R.pendientes.includes(R.actual)?cliente(R.actual):null;
+  const act=R.actual&&R.pendientes.includes(R.actual)?clienteRuta(R.actual):null;
   // En el orden del recorrido: cada uno es el más cercano al anterior
-  const resto=R.pendientes.filter(id=>id!==R.actual).map(cliente).filter(Boolean);
+  const resto=R.pendientes.filter(id=>id!==R.actual).map(clienteRuta).filter(Boolean);
   const base=act?1:0;
   const prev=i=>i>0?resto[i-1]:(act||null);
   const item=(c,i)=>{ const a=prev(i), d=c.lat==null?null:(a&&a.lat!=null?`a ${textoDist(distancia(a,c))} del anterior`:(yo?`a ${textoDist(distancia(yo,c))} de ti`:''));
@@ -1496,7 +1541,7 @@ function pintarOrden(){
       <div class="tarjeta">${itemsRuta(R,true).filter(x=>x.tipo!=='pendiente').sort((a,b)=>a.hora.localeCompare(b.hora)).map(x=>renglonVisita(x,false)).join('')}</div>`:''}`;
   el.querySelectorAll('[data-visita]').forEach(b=>b.onclick=()=>editarVisita(R,true,b.dataset.visita,()=>{ pintarOrden(); pintarTotal(); }));
   el.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>irCon(b.dataset.ir));
-  el.querySelectorAll('[data-cancelar]').forEach(b=>b.onclick=()=>cancelarSinVisita(cliente(b.dataset.cancelar)));
+  el.querySelectorAll('[data-cancelar]').forEach(b=>b.onclick=()=>cancelarSinVisita(clienteRuta(b.dataset.cancelar)));
   $('#oAgregar').onclick=()=>agregarEnRuta(()=>pintarOrden());
   const rr=$('#oRearmar'); if(rr) rr.onclick=async()=>{
     rr.disabled=true; rr.textContent='Buscando tu ubicación…';
@@ -1514,7 +1559,7 @@ function reanudarRuta(){
 async function mostrarEleccion(auto=false){
   detenerNavegacion();
   R.actual=null; R.alerta10=false;
-  R.pendientes=R.pendientes.filter(id=>cliente(id)); guardarRuta();
+  R.pendientes=R.pendientes.filter(id=>clienteRuta(id)); guardarRuta();
   if(!R.pendientes.length) return finalizarRuta();
   abrirPantallaRuta(`<div class="cargando"><div class="giro"></div>Buscando los clientes más cercanos…</div>`);
   mantenerPantalla(true);
@@ -1522,7 +1567,7 @@ async function mostrarEleccion(auto=false){
   // Si el GPS se leyó hace poco (por ejemplo, en la casa del cliente anterior) se usa esa posición
   pos=posReciente();
   if(!pos){ try{ pos=await obtenerPosicion(12000); }catch(e){ errorGPS=e.message; } }
-  const pend=R.pendientes.map(cliente);
+  const pend=R.pendientes.map(clienteRuta);
   const conUb=pend.filter(c=>c.lat!=null), sinUb=pend.filter(c=>c.lat==null);
   let info={};
   if(pos){
@@ -1537,7 +1582,7 @@ async function mostrarEleccion(auto=false){
   }
   // Rutas iniciadas antes de esta versión: se arma el recorrido ahora
   if(!R.plan) planificarRuta(pos);
-  const sigPlan=cliente(R.pendientes.find(id=>cliente(id).lat!=null));
+  const sigPlan=clienteRuta(R.pendientes.find(id=>clienteRuta(id).lat!=null));
   const top=sigPlan?[sigPlan,...conUb.filter(c=>c!==sigPlan)].slice(0,pos?3:1):[];
   // Al terminar con un cliente se sigue con el que toca en el recorrido
   if(auto && top.length){
@@ -1581,7 +1626,7 @@ function iconoYo(){ return L.divIcon({className:'',html:'<div class="marcadorYo"
 function iconoDest(){ return L.divIcon({className:'',html:'<div class="marcadorDest"><span>$</span></div>',iconSize:[34,34],iconAnchor:[17,34]}); }
 
 function iniciarNavegacion(id,reanudando=false){
-  const c=cliente(id); if(!c) return mostrarEleccion();
+  const c=clienteRuta(id); if(!c) return mostrarEleccion();
   if(!reanudando) R.alerta10=false;
   R.actual=id; guardarRuta();
   detenerNavegacion();
@@ -1732,6 +1777,7 @@ function hayLlegada(nav,p,d){
 
 /* ---- Corregir la ubicación del cliente durante la ruta ---- */
 async function guardarUbicacion(c,p){
+  if(R.destinos) delete R.destinos[c.id];
   const nuevo={...cliente(c.id),lat:p.lat,lng:p.lng,editado:new Date().toISOString()};
   await DB.poner('clientes',nuevo);
   clientes[clientes.findIndex(x=>x.id===c.id)]=nuevo;
