@@ -102,6 +102,10 @@ a.btn{text-decoration:none}
 .fotoVacia{height:120px;border:2px dashed var(--linea);border-radius:14px;display:grid;place-items:center;color:var(--suave);background:#fff}
 
 /* Diálogos */
+.esperaCobro{position:fixed;left:10px;right:10px;bottom:calc(72px + env(safe-area-inset-bottom));z-index:55;display:flex;gap:8px;align-items:center;
+  background:var(--verde);color:#fff;border:0;border-radius:16px;padding:12px 14px;font:inherit;font-weight:800;font-size:16px;box-shadow:0 6px 18px rgba(0,0,0,.3);text-align:left}
+.esperaCobro small{display:block;font-weight:600;font-size:12px;opacity:.9}
+.velo.esperando{display:none}
 .velo{position:fixed;inset:0;z-index:60;background:rgba(10,20,35,.55);display:flex;align-items:flex-end;justify-content:center}
 .dialogo{background:#fff;width:100%;max-width:520px;border-radius:22px 22px 0 0;padding:20px 18px calc(18px + env(safe-area-inset-bottom));
   max-height:92vh;overflow:auto;animation:sube .2s ease-out}
@@ -327,7 +331,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v35';
+const APP_VERSION='v36';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -541,7 +545,7 @@ function dialogo({titulo='',texto='',html='',botones=[{txt:'Aceptar',clase:'',va
     const caja=velo.querySelector('.botones');
     botones.forEach(b=>{
       const el=document.createElement('button'); el.className='btn ancho '+(b.clase||''); el.textContent=b.txt;
-      el.onclick=()=>{ const v=typeof b.valor==='function'?b.valor(velo):b.valor; if(v===undefined) return; velo.remove(); res(v); };
+      el.onclick=()=>{ const v=typeof b.valor==='function'?b.valor(velo):b.valor; if(v===undefined) return; velo.remove(); if(!document.querySelector('.velo.esperando')){ const p=document.getElementById('esperaCobro'); if(p) p.remove(); } res(v); };
       caja.appendChild(el);
     });
     document.body.appendChild(velo);
@@ -576,7 +580,7 @@ window.addEventListener('popstate',()=>{
   hayGuardia=false;
   const encima=document.querySelector('.hoja.encima');
   if(encima){ encima.querySelector('[data-cerrar]').click(); asegurarAtras(); return; }
-  const velos=document.querySelectorAll('.velo');
+  const velos=document.querySelectorAll('.velo:not(.esperando)');
   if(velos.length){ const bs=velos[velos.length-1].querySelectorAll('.botones .btn'); if(bs.length) bs[bs.length-1].click(); asegurarAtras(); return; }
   const hojas=document.querySelectorAll('.hoja');
   if(hojas.length){ const h=hojas[hojas.length-1], x=h.querySelector('[data-cerrar]'); if(x) x.click(); else h.remove(); asegurarAtras(); return; }
@@ -729,7 +733,7 @@ function formCliente(existente=null,inicial={},alGuardar=null){
     c.editado=new Date().toISOString();
     await DB.poner('clientes',c);
     const i=clientes.findIndex(x=>x.id===c.id); if(i>=0) clientes[i]=c; else clientes.push(c);
-    h.remove();
+    h.remove(); alCambiarCliente(c.id);
     if(alGuardar){ alGuardar(c); return; }
     document.querySelectorAll('.hoja').forEach(x=>x.remove());
     toast(existente?'Cliente actualizado':'Cliente guardado');
@@ -1645,7 +1649,17 @@ async function guardarUbicacion(c,p){
   const nuevo={...cliente(c.id),lat:p.lat,lng:p.lng,editado:new Date().toISOString()};
   await DB.poner('clientes',nuevo);
   clientes[clientes.findIndex(x=>x.id===c.id)]=nuevo;
+  alCambiarCliente(c.id);
   return nuevo;
+}
+/* Cambiaste un cliente de la ruta (ubicación, nombre…): el recorrido se vuelve a acomodar */
+function alCambiarCliente(id){
+  if(R.estado!=='activa'||!R.pendientes.includes(id)) return;
+  planificarRuta(yoAhora());
+  if(pantallaRuta.classList.contains('oculto')) return;
+  if(vistaRuta==='orden') pintarOrden();
+  else if(vistaRuta==='mapa') pintarMapaRuta();
+  toast('Recorrido acomodado de nuevo');
 }
 async function corregirUbicacion(c){
   const op=await dialogo({titulo:'Corregir ubicación',texto:`¿Cómo quieres corregir la ubicación de <b>${esc(c.nombre)}</b>?`,
@@ -1851,6 +1865,7 @@ function revisarTodos(){
 $('#btnRevisar').onclick=revisarTodos;
 
 function detenerNavegacion(){
+  quitarLlegadaEnEspera();
   if(!NAV) return;
   clearTimeout(NAV.revisa);
   if(NAV.watch!=null && navigator.geolocation) navigator.geolocation.clearWatch(NAV.watch);
@@ -1859,6 +1874,8 @@ function detenerNavegacion(){
 }
 
 async function llegada(c,manual){
+  if(manual&&reabrirLlegada()) return;
+  if(document.querySelector('.velo.esperando')) return;
   if(!NAV||NAV.llegado) return;
   NAV.llegado=true;
   const grupo=grupoParada(cliente(c.id)||c);
@@ -1872,7 +1889,7 @@ async function llegada(c,manual){
       <label class="campo"><span>Cantidad cobrada${c.ultimoPago?' <span class="opcional">(la de su último pago; cámbiala si pagó otra)</span>':''}</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${esc(c.ultimoPago||'')}"></label>
       <input type="file" id="dFotoIn" accept="image/*" capture="environment" class="oculto">`,
     alAbrir:v=>{
-      prepararFotoTel(v,c);
+      prepararFotoTel(v,c); botonEsperar(v,c.nombre);
       // Si no hay cantidad sugerida, el cursor queda listo para escribirla
       if(!c.ultimoPago) setTimeout(()=>{ const x=v.querySelector('#dMonto'); x.focus(); x.select(); },250);
     },
@@ -1886,6 +1903,22 @@ async function llegada(c,manual){
   if(r.noPago){ const m=await pedirMotivo(c.nombre); if(m){ cancelarCobro(c,m); return; } }
   if(NAV){ NAV.llegado=false; NAV.pausaLlegada=Date.now()+90000; }
 }
+
+/* ---- "Esperar": oculta la ventana de llegada para ver la lista o el mapa mientras el cliente paga.
+   Queda un botón verde abajo para volver a abrirla. ---- */
+function botonEsperar(v,nombre){
+  const b=document.createElement('button'); b.type='button'; b.className='btn borde ancho'; b.style.marginBottom='8px';
+  b.textContent='⏳ Esperar (ver la lista mientras me paga)';
+  b.onclick=()=>{ v.classList.add('esperando');
+    let p=$('#esperaCobro'); if(p) p.remove();
+    p=document.createElement('button'); p.id='esperaCobro'; p.className='esperaCobro';
+    p.innerHTML=`<span style="font-size:24px">💵</span><span style="flex:1;min-width:0">Registrar cobro<small>${esc(nombre)}</small></span><span>▲</span>`;
+    p.onclick=()=>reabrirLlegada(); document.body.appendChild(p); };
+  const caja=v.querySelector('.botones'); caja.insertBefore(b,caja.firstChild);
+}
+function reabrirLlegada(){ const v=document.querySelector('.velo.esperando'); if(v) v.classList.remove('esperando'); const p=$('#esperaCobro'); if(p) p.remove(); asegurarAtras(); return !!v; }
+/* Si cambias de cliente o termina la navegación, la ventana pendiente se quita */
+function quitarLlegadaEnEspera(){ document.querySelectorAll('.velo.esperando').forEach(v=>v.remove()); const p=$('#esperaCobro'); if(p) p.remove(); }
 
 /* Foto de la fachada y botón de llamar dentro de la ventana de llegada */
 function prepararFotoTel(v,c){
@@ -1921,7 +1954,7 @@ async function llegadaCasa(c,grupo){
     titulo:'📍 Llegamos a la casa', texto:`Aquí se cobra a <b>${grupo.length}</b> personas. Escribe cuánto pagó cada una (o marca <b>No pagó</b>).`,
     html:`<div id="dFotoCaja" style="margin-bottom:10px"></div><div class="fila" id="dTelCaja" style="margin-bottom:12px"></div>${filas}
       <input type="file" id="dFotoIn" accept="image/*" capture="environment" class="oculto">`,
-    alAbrir:v=>{ prepararFotoTel(v,c);
+    alAbrir:v=>{ prepararFotoTel(v,c); botonEsperar(v,grupo.map(x=>x.nombre).join(' · '));
       v.querySelectorAll('[data-k]').forEach(t=>{ const chk=t.querySelector('.dNoPago'), inp=t.querySelector('.dMontoC');
         chk.onchange=()=>{ inp.disabled=chk.checked; inp.style.opacity=chk.checked?.4:1; }; }); },
     botones:[
