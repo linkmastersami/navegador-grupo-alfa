@@ -332,7 +332,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v37';
+const APP_VERSION='v38';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -1287,6 +1287,7 @@ async function revisarCasasLista(){
    Los que no tienen ubicación van al final. ---- */
 function planificarRuta(desde){
   R.pendientes=R.pendientes.filter(id=>cliente(id));
+  limpiarUniones();
   const act=R.actual&&R.pendientes.includes(R.actual)?cliente(R.actual):null;
   const resto=R.pendientes.filter(id=>!act||id!==act.id);
   const libres=resto.filter(id=>cliente(id).lat!=null), sinUb=resto.filter(id=>cliente(id).lat==null);
@@ -1295,15 +1296,35 @@ function planificarRuta(desde){
   const orden=cadenaCercana(act&&act.lat!=null?act:(desde||null),libres);
   R.pendientes=juntarFamilias([...(act?[act.id]:[]),...orden,...sinUb]); R.plan=true; guardarRuta();
 }
-/* Siempre el más cercano al anterior, uno por uno */
+/* Siempre el más cercano al anterior, uno por uno.
+   Respeta las uniones que hiciste en el mapa (R.uniones: después de A va B). */
 function cadenaCercana(cur,ids){
+  const U=R.uniones||{}, fuente={}; Object.keys(U).forEach(a=>{ fuente[U[a]]=a; });
   const libres=[...ids], orden=[];
   while(libres.length){
-    let bi=0;
-    if(cur){ let bd=Infinity; libres.forEach((id,i)=>{ const d=distancia(cur,cliente(id)); if(d<bd){ bd=d; bi=i; } }); }
-    const id=libres.splice(bi,1)[0]; orden.push(id); cur=cliente(id);
+    let id=null;
+    if(cur&&cur.id&&U[cur.id]&&libres.includes(U[cur.id])) id=U[cur.id];
+    else{
+      // quien va unido después de otro cliente que aún falta, espera su turno
+      const ok=libres.filter(x=>!(fuente[x]&&libres.includes(fuente[x])));
+      const pool=ok.length?ok:libres; id=pool[0];
+      if(cur){ let bd=Infinity; pool.forEach(x=>{ const d=distancia(cur,cliente(x)); if(d<bd){ bd=d; id=x; } }); }
+    }
+    libres.splice(libres.indexOf(id),1); orden.push(id); cur=cliente(id);
   }
   return orden;
+}
+/* Quita uniones de clientes que ya no están pendientes */
+function limpiarUniones(){
+  const U=R.uniones||{}, P=new Set(R.pendientes);
+  Object.keys(U).forEach(a=>{ if(!P.has(a)||!P.has(U[a])) delete U[a]; }); R.uniones=U;
+}
+function unir(a,b){
+  const U=R.uniones=R.uniones||{};
+  Object.keys(U).forEach(k=>{ if(U[k]===b) delete U[k]; });   // a cada cliente solo lo antecede uno
+  U[a]=b;
+  // si se formó un círculo (…b → … → a → b), se quita la unión que llegaba a "a"
+  let x=b, n=0; while(U[x]&&n++<500){ if(U[x]===a){ delete U[x]; break; } x=U[x]; }
 }
 /* Los familiares de la misma casa quedan uno tras otro (es una sola parada) */
 function juntarFamilias(todo){
@@ -1316,6 +1337,7 @@ function juntarFamilias(todo){
 function moverEnRecorrido(desdeId,haciaId){
   const P=R.pendientes.filter(id=>cliente(id)), i=P.indexOf(desdeId);
   if(i<0||desdeId===haciaId||!P.includes(haciaId)||haciaId===R.actual) return false;
+  unir(desdeId,haciaId);
   const fijos=P.slice(0,i+1).filter(id=>id!==haciaId);
   const resto=P.filter(id=>!fijos.includes(id)&&id!==haciaId);
   const conUb=resto.filter(id=>cliente(id).lat!=null), sinUb=resto.filter(id=>cliente(id).lat==null);
@@ -1361,7 +1383,7 @@ function pintarMapaRuta(sinEncuadre){
   const el=$('#rvMapa');
   if(!hayMapa()){ el.innerHTML='<div class="vacio">El mapa necesita internet.</div>'; return; }
   if(!mapaRuta){
-    el.innerHTML='<div id="mrMapa" style="position:absolute;inset:0"></div><div class="mrInfo" id="mrInfo"></div><div class="mrAyuda oculto" id="mrAyuda">Mantén el dedo en un número y deslízalo hasta el cliente que quieres que siga después. Lo de antes no se mueve.</div>';
+    el.innerHTML='<div id="mrMapa" style="position:absolute;inset:0"></div><div class="mrInfo" id="mrInfo"></div><div class="mrAyuda oculto" id="mrAyuda">Mantén el dedo en un número y deslízalo hasta el cliente que quieres que siga después. Lo de antes no se mueve. Las uniones que haces se ven en amarillo y se respetan aunque la ruta se vuelva a armar.</div>';
     mapaRuta=L.map('mrMapa',{zoomControl:false}); L.control.zoom({position:'bottomright'}).addTo(mapaRuta);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(mapaRuta);
     mapaRuta._capa=L.layerGroup().addTo(mapaRuta);
@@ -1387,12 +1409,22 @@ function pintarMapaRuta(sinEncuadre){
     m._id=id; m._num=num; marcas.push(m); linea.push([c.lat,c.lng]);
     puntos.push([c.lat,c.lng]); });
   // En modo acomodar: línea del recorrido y arrastre de un número a otro
-  if(acomodando&&linea.length>1) L.polyline(linea,{color:'#0E2A47',weight:3,opacity:.7,interactive:false}).addTo(capa);
+  if(acomodando&&linea.length>1){
+    L.polyline(linea,{color:'#0E2A47',weight:3,opacity:.7,interactive:false}).addTo(capa);
+    const U=R.uniones||{};
+    for(let k=1;k<marcas.length;k++) if(U[marcas[k-1]._id]===marcas[k]._id) L.polyline([marcas[k-1].getLatLng(),marcas[k].getLatLng()],{color:'#E3A21A',weight:6,opacity:.95,interactive:false}).addTo(capa);
+  }
   if(acomodando) marcas.forEach(m=>prepararArrastre(m,marcas,capa));
   $('#mrAyuda').classList.toggle('oculto',!acomodando);
   $('#mrInfo').innerHTML=`<span class="pildora">Por visitar: <b>${R.pendientes.length}</b></span><span class="pildora">Cobrado: <b>${fmt(R.cobros.reduce((s,x)=>s+x.monto,0))}</b></span>${sinUb?`<span class="pildora">${sinUb} sin ubicación</span>`:''}
-    <button class="btn ${acomodando?'verde':'oro'}" id="mrAcomodar" style="min-height:34px;padding:4px 12px;font-size:14px;margin-left:auto">${acomodando?'✓ Listo':'✏️ Acomodar recorrido'}</button>`;
+    ${acomodando&&Object.keys(R.uniones||{}).length?`<button class="btn claro" id="mrReset" style="min-height:34px;padding:4px 10px;font-size:13px;margin-left:auto">↺ Restablecer</button>`:''}
+    <button class="btn ${acomodando?'verde':'oro'}" id="mrAcomodar" style="min-height:34px;padding:4px 12px;font-size:14px;${acomodando&&Object.keys(R.uniones||{}).length?'':'margin-left:auto'}">${acomodando?'✓ Listo':'✏️ Acomodar recorrido'}</button>`;
   $('#mrAcomodar').onclick=()=>{ acomodando=!acomodando; pintarMapaRuta(true); };
+  const rs=$('#mrReset'); if(rs) rs.onclick=async()=>{
+    const n=Object.keys(R.uniones||{}).length;
+    if(!await confirmar('Restablecer recorrido',`Se quitan las <b>${n}</b> unión(es) que hiciste y el recorrido se vuelve a armar solo (siempre el más cercano al anterior).`,'Restablecer','rojo')) return;
+    R.uniones={}; planificarRuta(yoAhora()); toast('Recorrido restablecido'); pintarMapaRuta(true);
+  };
   if(sinEncuadre) return;
   setTimeout(()=>{ try{ mapaRuta.invalidateSize(false); if(puntos.length) mapaRuta.fitBounds(puntos,{padding:[50,50],maxZoom:16}); else mapaRuta.setView([CENTRO_DEFECTO.lat,CENTRO_DEFECTO.lng],11); }catch(e){} },60);
 }
@@ -1427,14 +1459,16 @@ function prepararArrastre(m,marcas,capa){
 async function cancelarSinVisita(c){
   if(!c) return;
   const m=await pedirMotivo(c.nombre,['Canceló por llamada']); if(!m) return;
-  const eraActual=R.actual===c.id;
+  const eraActual=R.actual===c.id, yo=yoAhora();
   R.cancelados.push({id:c.id,nombre:c.nombre,motivo:m,hora:new Date().toISOString(),sinVisita:true});
-  R.pendientes=R.pendientes.filter(x=>x!==c.id); if(eraActual) R.actual=null; guardarRuta();
+  R.pendientes=R.pendientes.filter(x=>x!==c.id); if(eraActual) R.actual=null;
+  // La ruta se vuelve a armar sin él (si ibas con él, desde donde estás)
+  planificarRuta(yo);
   if(eraActual) pantallaRegistrado('Cobro cancelado',`${c.nombre} · ${m}`); else toast(`Cancelado: ${c.nombre}`);
   await enviarWhats(null,c,m);
   if(eraActual){ hablar('Cobro cancelado.'); return mostrarEleccion(true); }
   if(!R.pendientes.length) return finalizarRuta();
-  if(vistaRuta==='orden') pintarOrden();
+  if(vistaRuta==='orden') pintarOrden(); else if(vistaRuta==='mapa') pintarMapaRuta(true);
 }
 
 /* ---- Vista Lista: pendientes del más cercano al más lejano ---- */
@@ -2112,9 +2146,12 @@ async function registrarCobro(c,monto){
   mostrarEleccion(true);
 }
 async function cancelarCobro(c,motivo){
-  const pos=posicionReporte();
+  const pos=posicionReporte(), yo=yoAhora();
   R.cancelados.push({id:c.id,nombre:c.nombre,motivo,hora:new Date().toISOString()});
   R.pendientes=R.pendientes.filter(x=>x!==c.id); R.actual=null; guardarRuta();
+  // Si cancelaste antes de llegar, la ruta se vuelve a armar desde donde estás.
+  // (Si ya estabas en su casa, se sigue con el que tocaba.)
+  if(yo&&c.lat!=null&&distancia(yo,c)>150) planificarRuta(yo);
   pantallaRegistrado('Cobro cancelado',`${c.nombre} · ${motivo}`);
   await enviarWhats(await pos,c,motivo);
   hablar('Cobro cancelado.');
