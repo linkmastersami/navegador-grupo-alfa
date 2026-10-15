@@ -327,7 +327,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v34';
+const APP_VERSION='v35';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -1094,13 +1094,13 @@ function mostrarResultadosFoto(h,res){
     const htmlCasa=(pares.length||casas.length)?`<h3 style="margin:4px 0 8px">🏠 Misma casa (${pares.length+casas.length})</h3>
       ${pares.map(([a,b])=>`<div class="tarjeta" style="margin-bottom:10px;border-left:6px solid var(--oro)">
         <small style="color:var(--suave)">Están en la misma ubicación${distancia(a,b)>2?` (a ${Math.round(distancia(a,b))} m)`:''}:</small><br><b>${esc(a.nombre)}</b> y <b>${esc(b.nombre)}</b>
-        <div class="fila" style="margin-top:8px;flex-wrap:wrap">${bt(`data-juntar="${a.id},${b.id}"`,'👨‍👩‍👧 Familiares: se cobran juntos','verde')}${bt(`data-separar="${a.id},${b.id}"`,'Cobros diferentes','borde')}</div></div>`).join('')}
+        <div class="fila" style="margin-top:8px;flex-wrap:wrap">${bt(`data-juntar="${a.id},${b.id}"`,'👨‍👩‍👧 Familiares: se cobran juntos','verde')}${bt(`data-separar="${a.id},${b.id}"`,'Cobros diferentes','borde')}${bt(`data-misma="${a.id},${b.id}"`,'🔗 Es la misma persona: unir','claro')}</div></div>`).join('')}
       ${casas.map(({a,otros})=>`<div class="tarjeta" style="margin-bottom:10px;border-left:6px solid var(--oro)">
         <small style="color:var(--suave)">En la casa de <b style="color:var(--texto)">${esc(a.nombre)}</b> también se cobra a:</small>
         ${otros.map(x=>{ const ya=(extras[a.id]||[]).includes(x.id), fam=sonFamilia(a,x);
           return `<div style="padding:8px 0;border-top:1px solid var(--linea);margin-top:8px"><b>${esc(x.nombre)}</b> <small style="color:var(--suave)">${fam?'· familiar':`· a ${Math.round(distancia(a,x))} m`}${x.ultimoPago?' · '+fmt(x.ultimoPago):''}</small>
           <div class="fila" style="margin-top:6px;flex-wrap:wrap">${ya?`<span class="chip verde" style="align-self:center">✓ Se agrega a la ruta</span>${bt(`data-xquitar="${a.id},${x.id}"`,'Quitar','claro')}`
-            :`${bt(`data-xagregar="${a.id},${x.id}"`,fam?'➕ Agregar a la ruta':'➕ Familiar: agregar','verde')}${bt(`data-xhoyno="${a.id},${x.id}"`,fam?'Hoy no':'Familiar, hoy no','claro')}${fam?'':bt(`data-xsep="${a.id},${x.id}"`,'Cobro diferente','borde')}`}</div></div>`; }).join('')}</div>`).join('')}`:'';
+            :`${bt(`data-xagregar="${a.id},${x.id}"`,fam?'➕ Agregar a la ruta':'➕ Familiar: agregar','verde')}${bt(`data-xhoyno="${a.id},${x.id}"`,fam?'Hoy no':'Familiar, hoy no','claro')}${fam?'':bt(`data-xsep="${a.id},${x.id}"`,'Cobro diferente','borde')}${bt(`data-misma="${a.id},${x.id}"`,'🔗 Es la misma persona: unir','claro')}`}</div></div>`; }).join('')}</div>`).join('')}`:'';
     const cuenta=g=>filas.filter(r=>r.grupo===g).length;
     const tarjeta=(r,i)=>{
         const elegido=sel[i]&&cliente(sel[i]);
@@ -1134,6 +1134,24 @@ function mostrarResultadosFoto(h,res){
     cont.querySelectorAll('[data-xquitar]').forEach(b=>b.onclick=()=>{ const [a,x]=par(b.dataset.xquitar); extras[a]=(extras[a]||[]).filter(y=>y!==x); pintar(); });
     cont.querySelectorAll('[data-xhoyno]').forEach(b=>b.onclick=async()=>{ const [a,x]=par(b.dataset.xhoyno); if(!sonFamilia(cliente(a),cliente(x))) await juntarCasa(a,x); omitidos.add(x); R.noAgregar=[...(R.noAgregar||[]),x]; guardarRuta(); pintar(); });
     cont.querySelectorAll('[data-xsep]').forEach(b=>b.onclick=async()=>{ const [a,x]=par(b.dataset.xsep); await separarCasa(a,x); pintar(); });
+    // Es el mismo cliente registrado dos veces: se unen en uno solo (con el nombre que elijas)
+    cont.querySelectorAll('[data-misma]').forEach(b=>b.onclick=async()=>{
+      const [ia,ix]=par(b.dataset.misma), A=cliente(ia), X=cliente(ix); if(!A||!X) return;
+      const r=await dialogo({titulo:'🔗 Unir en un solo cliente',texto:`<b>${esc(A.nombre)}</b> y <b>${esc(X.nombre)}</b> se van a juntar en un solo cliente (se conservan sus pagos, teléfono y foto).<br><br>¿Con qué nombre se queda?`,
+        botones:[{txt:A.nombre,clase:'oro',valor:'a'},{txt:X.nombre,clase:'borde',valor:'x'},{txt:'✏️ Escribir otro nombre',clase:'claro',valor:'otro'},{txt:'Cancelar',clase:'claro',valor:null}]});
+      if(!r) return;
+      let nombre=r==='x'?X.nombre:A.nombre;
+      if(r==='otro'){ const t=await dialogo({titulo:'Nombre del cliente',html:`<label class="campo"><input id="dNom" value="${esc(A.nombre.length>=X.nombre.length?A.nombre:X.nombre)}" autocomplete="off"></label>`,
+          alAbrir:v=>setTimeout(()=>{ const x=v.querySelector('#dNom'); x.focus(); x.select(); },250),
+          botones:[{txt:'Guardar',clase:'oro',valor:v=>{ const t=v.querySelector('#dNom').value.trim().replace(/\s+/g,' '); if(!t){ toast('Escribe el nombre'); return undefined; } return t; }},{txt:'Cancelar',clase:'claro',valor:null}]});
+        if(!t) return; nombre=t; }
+      // se queda el de tu lista (y su ubicación); el otro se borra
+      await unirClientes({...A,nombre},X,A);
+      Object.keys(sel).forEach(k=>{ if(sel[k]===X.id) sel[k]=A.id; });
+      filas.forEach(f=>{ f.cands=f.cands.filter(c=>c.c.id!==X.id).map(c=>({...c,c:cliente(c.c.id)||c.c})); });
+      Object.keys(extras).forEach(k=>{ extras[k]=extras[k].filter(id=>id!==X.id); });
+      toast(`Unidos: ${nombre}`); pintar();
+    });
     cont.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ sel[b.dataset.i]=b.dataset.id||null; const y=window.scrollY, hs=h.querySelector('.cuerpo'), hy=hs&&hs.scrollTop; pintar(); if(hs) hs.scrollTop=hy; window.scrollTo(0,y); });
     // Cambiar el nombre del cliente elegido por el que viene en la foto (editable)
     cont.querySelectorAll('[data-renombrar]').forEach(b=>b.onclick=async()=>{
@@ -1687,6 +1705,8 @@ async function unirClientes(queda,sale,ubic=queda){
     pagos:[...new Set([...(queda.pagos||[]),...(sale.pagos||[])])].sort().slice(-24), cobro:queda.cobro||sale.cobro||null,
     telefono:queda.telefono||sale.telefono||'', referencia:queda.referencia||sale.referencia||'',
     foto:queda.foto||sale.foto||null, enlace:queda.enlace||sale.enlace||''};
+  if(queda.casa||sale.casa) u.casa=queda.casa||sale.casa;
+  const sep=[...new Set([...(queda.separados||[]),...(sale.separados||[])])].filter(id=>id!==queda.id&&id!==sale.id); if(sep.length) u.separados=sep; else delete u.separados;
   if(ubic.lat!=null){ u.lat=ubic.lat; u.lng=ubic.lng; }
   else if(u.lat==null && sale.lat!=null){ u.lat=sale.lat; u.lng=sale.lng; }
   if(queda.visitas||sale.visitas){ u.visitas=(queda.visitas||0)+(sale.visitas||0); u.ultimaVisita=[queda.ultimaVisita,sale.ultimaVisita].filter(Boolean).sort().pop(); }
