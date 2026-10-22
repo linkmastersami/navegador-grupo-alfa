@@ -139,6 +139,12 @@ a.btn{text-decoration:none}
 .mrAyuda{position:absolute;left:10px;right:10px;bottom:10px;z-index:600;background:rgba(14,42,71,.92);color:#fff;border-radius:12px;padding:10px 12px;font-size:13px;margin-right:50px}
 .oItem{display:flex;gap:8px;align-items:center;background:#fff;border-radius:14px;padding:10px 12px;box-shadow:var(--sombra);margin-bottom:8px}
 .oItem .datos{flex:1;min-width:0}
+.oSel{outline:3px solid var(--verde);outline-offset:-3px}
+.oChk{flex:0 0 auto;display:grid;place-items:center}
+.oChk input{position:absolute;opacity:0;pointer-events:none}
+.oChk span{width:34px;height:34px;border-radius:10px;border:2px solid var(--linea);display:grid;place-items:center;font-weight:900;color:#fff;font-size:20px}
+.oSel .oChk span{background:var(--verde);border-color:var(--verde)}
+.oBarraJ{position:sticky;bottom:0;display:flex;gap:8px;background:var(--fondo);padding:10px 0;z-index:5}
 .oItem .datos b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .oItem .datos small{color:var(--suave);font-size:12px}
 .enCurso{position:relative}
@@ -332,7 +338,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v39';
+const APP_VERSION='v40';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -1236,7 +1242,38 @@ function mismaUbic(a,b){
   if(!a||!b||a.id===b.id||a.lat==null||b.lat==null) return false;
   return distancia(a,b)<=CASA_METROS;   // solo la ubicación, sin importar el apellido
 }
-function sonFamilia(a,b){ return !!(a&&b&&a.id!==b.id&&a.casa&&a.casa===b.casa); }
+function sonFamilia(a,b){
+  if(!a||!b||a.id===b.id) return false;
+  if(a.casa&&a.casa===b.casa) return true;
+  const H=R.juntosHoy||{}; return !!(H[a.id]&&H[a.id]===H[b.id]);   // juntos solo por hoy
+}
+/* Juntar a varios clientes para cobrarlos en una sola parada: para siempre (familia) o solo hoy */
+async function preguntarJuntar(ids){
+  ids=[...new Set(ids)].filter(id=>cliente(id)); if(ids.length<2) return false;
+  const nombres=ids.map(id=>'<b>'+esc(cliente(id).nombre)+'</b>').join(', ');
+  const r=await dialogo({titulo:'🏠 Cobrar juntos',texto:`Vas a cobrar juntos a ${nombres} en una sola parada: al llegar te pide la cantidad de cada uno y se manda un solo reporte.<br><br>¿Siempre se cobran juntos o solo hoy?`,
+    botones:[{txt:'👨‍👩‍👧 Siempre (son familia)',clase:'verde',valor:'siempre'},{txt:'📅 Solo hoy',clase:'oro',valor:'hoy'},{txt:'Cancelar',clase:'claro',valor:null}]});
+  if(!r) return false;
+  if(r==='siempre'){ for(let i=1;i<ids.length;i++) await juntarCasa(ids[0],ids[i]); }
+  else {
+    const H=R.juntosHoy=R.juntosHoy||{};
+    const clave=ids.map(id=>H[id]).find(Boolean)||uid(), viejas=new Set(ids.map(id=>H[id]).filter(k=>k&&k!==clave));
+    Object.keys(H).forEach(id=>{ if(viejas.has(H[id])) H[id]=clave; }); ids.forEach(id=>H[id]=clave);
+  }
+  planificarRuta(yoAhora()); toast(r==='siempre'?'Unidos: se cobran juntos siempre':'Juntos solo por hoy');
+  if(NAV&&R.actual&&ids.includes(R.actual)){ const v=vistaRuta; iniciarNavegacion(R.actual,true); if(v!=='nav') cambiarVista(v); }
+  return true;
+}
+async function separarDeGrupo(id){
+  const c=cliente(id); if(!c) return;
+  const otros=R.pendientes.filter(x=>x!==id).map(cliente).filter(x=>sonFamilia(c,x));
+  const r=await dialogo({titulo:'🏠 Separar',texto:`<b>${esc(c.nombre)}</b> se cobra junto con ${otros.map(x=>esc(x.nombre)).join(', ')}.<br><br>¿Quieres que vuelva a ser una parada aparte?`,
+    botones:[{txt:'Separar',clase:'rojo',valor:true},{txt:'Cancelar',clase:'claro',valor:null}]});
+  if(!r) return;
+  if(R.juntosHoy) delete R.juntosHoy[id];
+  if(c.casa) await sacarDeCasa(id);
+  planificarRuta(yoAhora()); toast('Separado');
+}
 function decidido(a,b){ return sonFamilia(a,b)||(a.separados||[]).includes(b.id)||(b.separados||[]).includes(a.id); }
 function familia(c){ return c&&c.casa?clientes.filter(x=>x.id!==c.id&&x.casa===c.casa):[]; }
 /* Quiénes se cobran también en esa casa: familiares ya unidos y vecinos pegados que aún no decides */
@@ -1464,6 +1501,14 @@ function prepararArrastre(m,marcas,capa){
       mapaRuta.dragging.enable(); if(temp) capa.removeLayer(temp);
       if(!movio) return;   // un toque normal abre su ventanita
       const o=cerca(ev);
+      if(o&&distancia(m.getLatLng().lat!=null?{lat:m.getLatLng().lat,lng:m.getLatLng().lng}:o,{lat:o.getLatLng().lat,lng:o.getLatLng().lng})<=80){
+        if(marcada) marcada.getElement().firstChild.style.transform='';
+        dialogo({titulo:'¿Qué quieres hacer?',texto:`<b>${esc(cliente(m._id).nombre)}</b> y <b>${esc(cliente(o._id).nombre)}</b> están muy cerca.`,
+          botones:[{txt:'🏠 Se cobran juntos',clase:'verde',valor:'juntos'},{txt:'➡️ Solo que siga después',clase:'oro',valor:'sigue'},{txt:'Cancelar',clase:'claro',valor:null}]})
+        .then(async r=>{ if(r==='juntos'){ await preguntarJuntar([m._id,o._id]); pintarMapaRuta(true); }
+          else if(r==='sigue'&&moverEnRecorrido(m._id,o._id)){ toast(`${cliente(o._id).nombre} ahora es el ${m._num+1}`,3000); pintarMapaRuta(true); } });
+        return;
+      }
       if(o&&moverEnRecorrido(m._id,o._id)){ toast(`${cliente(o._id).nombre} ahora es el ${m._num+1}`,3000); pintarMapaRuta(true); }
       else if(o&&o._id===R.actual) toast('Ese es el cliente al que vas ahora');
       else if(marcada) marcada.getElement().firstChild.style.transform=''; };
@@ -1517,6 +1562,7 @@ async function cancelarSinVisita(c){
 }
 
 /* ---- Vista Lista: pendientes del más cercano al más lejano ---- */
+let juntando=false; const selJ=new Set();
 function pintarOrden(){
   const el=$('#rvOrden');
   const yo=(NAV&&NAV.ultimaPos)||posReciente(10*60000);
@@ -1525,20 +1571,34 @@ function pintarOrden(){
   const resto=R.pendientes.filter(id=>id!==R.actual).map(clienteRuta).filter(Boolean);
   const base=act?1:0;
   const prev=i=>i>0?resto[i-1]:(act||null);
+  const enGrupo=c=>R.pendientes.some(o=>o!==c.id&&sonFamilia(c,cliente(o)));
+  const marcaGrupo=c=>enGrupo(c)?`<button type="button" class="chip verde" data-sepgrupo="${c.id}" style="border:0;margin-left:4px;font-size:11px">🏠 juntos</button>`:'';
+  const chk=c=>`<label class="oChk"><input type="checkbox" data-sel="${c.id}" ${selJ.has(c.id)?'checked':''}><span>${selJ.has(c.id)?'✓':''}</span></label>`;
   const item=(c,i)=>{ const a=prev(i), d=c.lat==null?null:(a&&a.lat!=null?`a ${textoDist(distancia(a,c))} del anterior`:(yo?`a ${textoDist(distancia(yo,c))} de ti`:''));
-    return `<div class="oItem"><span class="oNum">${c.lat==null?'–':base+i+1}</span><div class="datos"><b>${esc(c.nombre)}</b><small>${c.ultimoPago?fmt(c.ultimoPago):''}${c.lat==null?' · ⚠️ sin ubicación':(d?' · '+d:'')}</small></div>
-    <button class="btn rojo" data-cancelar="${c.id}" style="min-height:36px;padding:6px 10px;font-size:13px">Cancelar</button>
-    <button class="btn claro" data-ir="${c.id}" style="min-height:36px;padding:6px 14px;font-size:14px">Ir</button></div>`; };
+    return `<div class="oItem${juntando&&selJ.has(c.id)?' oSel':''}"${juntando?` data-tsel="${c.id}"`:''}><span class="oNum">${c.lat==null?'–':base+i+1}</span><div class="datos"><b>${esc(c.nombre)}</b><small>${c.ultimoPago?fmt(c.ultimoPago):''}${c.lat==null?' · ⚠️ sin ubicación':(d?' · '+d:'')}${juntando?'':marcaGrupo(c)}</small></div>
+    ${juntando?chk(c):`<button class="btn rojo" data-cancelar="${c.id}" style="min-height:36px;padding:6px 10px;font-size:13px">Cancelar</button>
+    <button class="btn claro" data-ir="${c.id}" style="min-height:36px;padding:6px 14px;font-size:14px">Ir</button>`}</div>`; };
   el.innerHTML=`
     <h2 style="margin:0 0 4px">Clientes de la ruta</h2>
-    <p style="margin:0 0 12px;color:var(--suave);font-size:13px">${resto.length} por visitar, en el orden de tu recorrido: cada cliente es el más cercano al anterior. Toca <b>Ir</b> para cambiar de cliente (el recorrido se vuelve a armar desde él).</p>
-    ${act?`<div class="tarjeta" style="margin-bottom:10px;border-left:6px solid var(--oro);display:flex;align-items:center;gap:8px"><span class="oNum">1</span><div style="flex:1;min-width:0"><small style="color:var(--suave)">Ahora vas con</small><br><b>${esc(act.nombre)}</b></div>
-      <button class="btn rojo" data-cancelar="${act.id}" style="min-height:36px;padding:6px 10px;font-size:13px">Cancelar</button></div>`:''}
+    ${juntando?`<div class="aviso info" style="margin:6px 0 12px">🏠 <b>Marca a los clientes que se cobran juntos</b> (en la misma parada) y toca <b>Juntar</b>.</div>`
+      :`<p style="margin:0 0 8px;color:var(--suave);font-size:13px">${resto.length} por visitar, en el orden de tu recorrido: cada cliente es el más cercano al anterior. Toca <b>Ir</b> para cambiar de cliente (el recorrido se vuelve a armar desde él).</p>
+      ${R.pendientes.length>1?`<button class="btn borde ancho" id="oJuntar" style="margin-bottom:10px;min-height:40px">🏠 Juntar clientes que se cobran juntos</button>`:''}`}
+    ${act?`<div class="tarjeta${juntando&&selJ.has(act.id)?' oSel':''}"${juntando?` data-tsel="${act.id}"`:''} style="margin-bottom:10px;border-left:6px solid var(--oro);display:flex;align-items:center;gap:8px"><span class="oNum">1</span><div style="flex:1;min-width:0"><small style="color:var(--suave)">Ahora vas con</small><br><b>${esc(act.nombre)}</b>${juntando?'':marcaGrupo(act)}</div>
+      ${juntando?chk(act):`<button class="btn rojo" data-cancelar="${act.id}" style="min-height:36px;padding:6px 10px;font-size:13px">Cancelar</button>`}</div>`:''}
     <div id="oLista">${resto.length?resto.map(item).join(''):'<div class="vacio" style="padding:16px">No hay más clientes pendientes.</div>'}</div>
-    <button class="btn borde ancho" id="oAgregar" style="margin-top:6px">➕ Agregar otro cliente a la ruta</button>
-    ${resto.length>1?`<button class="btn claro ancho" id="oRearmar" style="margin-top:8px">🔄 Rearmar el recorrido desde donde estoy</button>`:''}
+    ${juntando?`<div class="oBarraJ"><button class="btn claro" id="oJCancel" style="flex:1">Cancelar</button><button class="btn verde" id="oJOk" style="flex:2" ${selJ.size<2?'disabled':''}>🏠 Juntar ${selJ.size} cliente(s)</button></div>`:''}
+    ${juntando?'':`<button class="btn borde ancho" id="oAgregar" style="margin-top:6px">➕ Agregar otro cliente a la ruta</button>`}
+    ${juntando?'':resto.length>1?`<button class="btn claro ancho" id="oRearmar" style="margin-top:8px">🔄 Rearmar el recorrido desde donde estoy</button>`:''}
     ${R.cobros.length||R.cancelados.length?`<h3>Ya visitados</h3><p style="margin:-4px 0 8px;color:var(--suave);font-size:13px">¿Te equivocaste? Toca un cliente para corregir la cantidad o deshacerlo.</p>
       <div class="tarjeta">${itemsRuta(R,true).filter(x=>x.tipo!=='pendiente').sort((a,b)=>a.hora.localeCompare(b.hora)).map(x=>renglonVisita(x,false)).join('')}</div>`:''}`;
+  if(juntando){
+    el.querySelectorAll('[data-tsel]').forEach(t=>t.onclick=e=>{ e.preventDefault(); const id=t.dataset.tsel; selJ.has(id)?selJ.delete(id):selJ.add(id); const y=el.scrollTop; pintarOrden(); el.scrollTop=y; });
+    $('#oJCancel').onclick=()=>{ juntando=false; selJ.clear(); pintarOrden(); };
+    $('#oJOk').onclick=async()=>{ if(await preguntarJuntar([...selJ])){ juntando=false; selJ.clear(); } pintarOrden(); };
+    return;
+  }
+  const bj=$('#oJuntar'); if(bj) bj.onclick=()=>{ juntando=true; selJ.clear(); pintarOrden(); };
+  el.querySelectorAll('[data-sepgrupo]').forEach(b=>b.onclick=async()=>{ await separarDeGrupo(b.dataset.sepgrupo); pintarOrden(); });
   el.querySelectorAll('[data-visita]').forEach(b=>b.onclick=()=>editarVisita(R,true,b.dataset.visita,()=>{ pintarOrden(); pintarTotal(); }));
   el.querySelectorAll('[data-ir]').forEach(b=>b.onclick=()=>irCon(b.dataset.ir));
   el.querySelectorAll('[data-cancelar]').forEach(b=>b.onclick=()=>cancelarSinVisita(clienteRuta(b.dataset.cancelar)));
