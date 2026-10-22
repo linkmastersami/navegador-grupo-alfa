@@ -338,7 +338,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v42';
+const APP_VERSION='v43';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -763,6 +763,7 @@ function verCliente(id){
       ${c.origen&&c.origen.startsWith('Oficina')?`<div class="renglon"><div class="izq"><small>Origen</small>Ubicación enviada por la ${esc(c.origen.toLowerCase())}</div></div>`:''}
       ${c.visitas?`<div class="renglon"><div class="izq"><small>Historial (importado de WhatsApp)</small>${c.visitas} visita(s) · última: ${new Date(c.ultimaVisita+'T12:00').toLocaleDateString('es-MX')}</div></div>`:''}
       ${promedioEspera(c)!=null?`<div class="renglon"><div class="izq"><small>Tiempo que tarda en pagar</small>⏱️ ${textoEspera(promedioEspera(c))} en promedio <span style="color:var(--suave);font-size:13px">(${c.esperas.length} cobro${c.esperas.length>1?'s':''} · última: ${textoEspera(c.esperas[c.esperas.length-1])})</span></div></div>`:''}
+      ${promedioLista(c.esperasNo)!=null?`<div class="renglon"><div class="izq"><small>Tiempo que esperas cuando no paga</small>⏱️ ${textoEspera(promedioLista(c.esperasNo))} en promedio <span style="color:var(--suave);font-size:13px">(${c.esperasNo.length} vez${c.esperasNo.length>1?'es':''} · última: ${textoEspera(c.esperasNo[c.esperasNo.length-1])})</span></div></div>`:''}
       <div class="renglon"><div class="izq"><small>Día de cobro</small>${textoCobro(cobroDe(c))}</div><button class="btn claro" id="vCobro" style="min-height:36px;padding:6px 12px;font-size:14px">Cambiar</button></div>
       <div class="renglon"><div class="izq"><small>Ubicación</small>${c.lat!=null?`${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`:'Sin ubicación'}</div></div>
     </div>
@@ -1551,7 +1552,9 @@ async function cancelarSinVisita(c){
   if(!c) return;
   const m=await pedirMotivo(c.nombre,['Canceló por llamada']); if(!m) return;
   const eraActual=R.actual===c.id, yo=yoAhora();
-  R.cancelados.push({id:c.id,nombre:c.nombre,motivo:m,hora:new Date().toISOString(),sinVisita:true});
+  const espera=esperaDe(c.id);
+  R.cancelados.push({id:c.id,nombre:c.nombre,motivo:m,hora:new Date().toISOString(),...(espera!=null?{llego:R.llegadas[c.id],espera}:{sinVisita:true})});
+  guardarEsperaNo(c.id,espera);
   R.pendientes=R.pendientes.filter(x=>x!==c.id); if(eraActual) R.actual=null;
   // La ruta se vuelve a armar sin él (si ibas con él, desde donde estás)
   planificarRuta(yo);
@@ -2077,7 +2080,7 @@ async function llegada(c,manual){
   else { await ofrecerGuardarAqui(c); c=cliente(c.id)||c; }
   if(grupo.length>1) return llegadaCasa(c,grupo);
   const r=await dialogo({
-    titulo:'📍 Llegamos al destino', texto:`¿Te pagó <b>${esc(c.nombre)}</b>?${promedioEspera(cliente(c.id))!=null?`<br><small style="color:var(--suave)">⏱️ Suele tardar ${textoEspera(promedioEspera(cliente(c.id)))} en pagar</small>`:''}`,
+    titulo:'📍 Llegamos al destino', texto:`¿Te pagó <b>${esc(c.nombre)}</b>?${promedioEspera(cliente(c.id))!=null?`<br><small style="color:var(--suave)">⏱️ Suele tardar ${textoEspera(promedioEspera(cliente(c.id)))} en pagar</small>`:''}${promedioLista((cliente(c.id)||{}).esperasNo)!=null?`<br><small style="color:var(--suave)">⚠️ Cuando no paga, sueles esperar ${textoEspera(promedioLista(cliente(c.id).esperasNo))}</small>`:''}`,
     html:`<div id="dFotoCaja" style="margin-bottom:10px"></div>
       <div class="fila" id="dTelCaja" style="margin-bottom:12px"></div>
       <label class="campo"><span>Cantidad cobrada${c.ultimoPago?' <span class="opcional">(la de su último pago; cámbiala si pagó otra)</span>':''}</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${esc(c.ultimoPago||'')}"></label>
@@ -2184,7 +2187,7 @@ async function registrarCasa(res){
   R.pendientes=R.pendientes.filter(id=>!ids.includes(id)); R.actual=null; guardarRuta(); pintarTotal();
   const total=res.reduce((t,x)=>t+(x.monto||0),0), pagaron=res.filter(x=>!x.noPago).length;
   pantallaRegistrado(pagaron?`Cobro de ${fmt(total)} registrado`:'Cobros cancelados',res.map(x=>x.c.nombre).join(' · '));
-  for(const x of res) if(!x.noPago) await recordarPago(x.c,x.monto,x.espera);
+  for(const x of res) if(!x.noPago) await recordarPago(x.c,x.monto,x.espera); else await guardarEsperaNo(x.c.id,x.espera);
   if(whatsActivo()){
     const p=await pos, lineas=[];
     if(p) lineas.push(`https://maps.google.com/?q=${p.lat.toFixed(7)},${p.lng.toFixed(7)}`);
@@ -2260,6 +2263,13 @@ function relojEspera(v,id){
   const pinta=()=>{ if(!document.body.contains(v)) return clearInterval(t); const e=esperaDe(id); el.textContent=e!=null?`⏱️ Esperando: ${textoEspera(e)}`:''; };
   const t=setInterval(pinta,1000); pinta();
 }
+/* Tiempo que esperaste cuando al final NO pagó (últimas 10 veces) */
+async function guardarEsperaNo(id,espera){
+  const x=cliente(id); if(!x||espera==null) return;
+  const u={...x,esperasNo:[...(x.esperasNo||[]),espera].slice(-10)};
+  await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===u.id)]=u;
+}
+function promedioLista(e){ return e&&e.length?Math.round(e.reduce((a,b)=>a+b,0)/e.length):null; }
 function promedioEspera(c){ const e=(c&&c.esperas)||[]; return e.length?Math.round(e.reduce((a,b)=>a+b,0)/e.length):null; }
 async function registrarCobro(c,monto){
   monto=Math.round(monto*100)/100;
@@ -2279,6 +2289,7 @@ async function registrarCobro(c,monto){
 async function cancelarCobro(c,motivo){
   const pos=posicionReporte(), yo=yoAhora(), espera=esperaDe(c.id);
   R.cancelados.push({id:c.id,nombre:c.nombre,motivo,hora:new Date().toISOString(),...(espera!=null?{llego:R.llegadas[c.id],espera}:{})});
+  guardarEsperaNo(c.id,espera);
   R.pendientes=R.pendientes.filter(x=>x!==c.id); R.actual=null; guardarRuta();
   // Si cancelaste antes de llegar, la ruta se vuelve a armar desde donde estás.
   // (Si ya estabas en su casa, se sigue con el que tocaba.)
@@ -2337,7 +2348,7 @@ async function finalizarRuta(){
 function itemsRuta(r,enCurso){
   const it=[];
   r.cobros.forEach((c,i)=>it.push({k:'c'+i,tipo:'cobro',id:c.id,nombre:c.nombre,monto:c.monto,hora:c.hora,espera:c.espera}));
-  r.cancelados.forEach((c,i)=>it.push({k:'x'+i,tipo:'cancelado',id:c.id,nombre:c.nombre,motivo:c.motivo,hora:c.hora}));
+  r.cancelados.forEach((c,i)=>it.push({k:'x'+i,tipo:'cancelado',id:c.id,nombre:c.nombre,motivo:c.motivo,hora:c.hora,espera:c.espera}));
   if(enCurso) r.pendientes.forEach((id,i)=>{ const c=cliente(id); if(c) it.push({k:'p'+i,tipo:'pendiente',id,nombre:c.nombre,hora:''}); });
   else r.pendientes.forEach((n,i)=>it.push({k:'p'+i,tipo:'pendiente',id:(r.pendIds||[])[i],nombre:n,hora:''}));
   return it;
@@ -2355,7 +2366,7 @@ function ordenarItems(items,modo,orden){
 }
 function renglonVisita(x,num){
   const marca=x.tipo==='cobro'?'✓':x.tipo==='cancelado'?'✗':'○';
-  const sub=x.tipo==='cobro'?hora(x.hora)+(x.espera!=null?` · ⏱️ tardó ${textoEspera(x.espera)}`:''):x.tipo==='cancelado'?`${esc(x.motivo)} · ${hora(x.hora)}`:'';
+  const sub=x.tipo==='cobro'?hora(x.hora)+(x.espera!=null?` · ⏱️ tardó ${textoEspera(x.espera)}`:''):x.tipo==='cancelado'?`${esc(x.motivo)} · ${hora(x.hora)}${x.espera!=null?` · ⏱️ esperaste ${textoEspera(x.espera)}`:''}`:'';
   const der=x.tipo==='cobro'?fmt(x.monto):x.tipo==='cancelado'?'<span class="chip rojo">Cancelado</span>':'<span class="chip">No visitado</span>';
   return `<div class="renglon toque" data-visita="${x.k}"><div class="izq">${num?`<span class="num">${num}.</span> `:''}${marca} ${esc(x.nombre)}${sub?`<small>${sub}</small>`:''}</div><div class="der">${der}</div></div>`;
 }
@@ -2363,7 +2374,7 @@ function textoResumen(r){
   const items=ordenarItems(itemsRuta(r,false),modoOrden(r),r.orden);
   let t=`GRUPO ALFA COBRANZA\nResumen de ruta – ${fechaLarga(r.fin)}\n${hora(r.inicio)} a ${hora(r.fin)}\n\nTOTAL COBRADO: ${fmt(r.total)}\n`;
   t+=`Cobrados: ${r.cobros.length}${r.cancelados.length?` · Cancelados: ${r.cancelados.length}`:''}${r.pendientes.length?` · No visitados: ${r.pendientes.length}`:''}\n\n`;
-  t+=items.map((x,i)=>`${i+1}. ${x.nombre} – ${x.tipo==='cobro'?`${fmt(x.monto)} (${hora(x.hora)}${x.espera!=null?`, tardó ${textoEspera(x.espera)}`:''})`:x.tipo==='cancelado'?`Cancelado: ${x.motivo}`:'No visitado'}`).join('\n')+'\n';
+  t+=items.map((x,i)=>`${i+1}. ${x.nombre} – ${x.tipo==='cobro'?`${fmt(x.monto)} (${hora(x.hora)}${x.espera!=null?`, tardó ${textoEspera(x.espera)}`:''})`:x.tipo==='cancelado'?`Cancelado: ${x.motivo}${x.espera!=null?` (esperé ${textoEspera(x.espera)})`:''}`:'No visitado'}`).join('\n')+'\n';
   return t;
 }
 function mostrarResumen(r,recien=false){
