@@ -338,7 +338,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v40';
+const APP_VERSION='v41';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -762,6 +762,7 @@ function verCliente(id){
       ${c.referencia?`<div class="renglon"><div class="izq"><small>Referencias</small>${esc(c.referencia)}</div></div>`:''}
       ${c.origen&&c.origen.startsWith('Oficina')?`<div class="renglon"><div class="izq"><small>Origen</small>Ubicación enviada por la ${esc(c.origen.toLowerCase())}</div></div>`:''}
       ${c.visitas?`<div class="renglon"><div class="izq"><small>Historial (importado de WhatsApp)</small>${c.visitas} visita(s) · última: ${new Date(c.ultimaVisita+'T12:00').toLocaleDateString('es-MX')}</div></div>`:''}
+      ${promedioEspera(c)!=null?`<div class="renglon"><div class="izq"><small>Tiempo que tarda en pagar</small>⏱️ ${textoEspera(promedioEspera(c))} en promedio <span style="color:var(--suave);font-size:13px">(${c.esperas.length} cobro${c.esperas.length>1?'s':''} · última: ${textoEspera(c.esperas[c.esperas.length-1])})</span></div></div>`:''}
       <div class="renglon"><div class="izq"><small>Día de cobro</small>${textoCobro(cobroDe(c))}</div><button class="btn claro" id="vCobro" style="min-height:36px;padding:6px 12px;font-size:14px">Cambiar</button></div>
       <div class="renglon"><div class="izq"><small>Ubicación</small>${c.lat!=null?`${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`:'Sin ubicación'}</div></div>
     </div>
@@ -2071,11 +2072,12 @@ async function llegada(c,manual){
   if(!NAV||NAV.llegado) return;
   NAV.llegado=true;
   const grupo=grupoParada(cliente(c.id)||c);
+  marcarLlegada(grupo.map(x=>x.id));
   if(!manual){ campana(); hablar(grupo.length>1?`Llegamos a la casa de ${c.nombre}. Aquí se cobra a ${grupo.length} personas.`:`Llegamos al destino. ¿Te pagó ${c.nombre}?`); }
   else { await ofrecerGuardarAqui(c); c=cliente(c.id)||c; }
   if(grupo.length>1) return llegadaCasa(c,grupo);
   const r=await dialogo({
-    titulo:'📍 Llegamos al destino', texto:`¿Te pagó <b>${esc(c.nombre)}</b>?`,
+    titulo:'📍 Llegamos al destino', texto:`¿Te pagó <b>${esc(c.nombre)}</b>?${promedioEspera(cliente(c.id))!=null?`<br><small style="color:var(--suave)">⏱️ Suele tardar ${textoEspera(promedioEspera(cliente(c.id)))} en pagar</small>`:''}`,
     html:`<div id="dFotoCaja" style="margin-bottom:10px"></div>
       <div class="fila" id="dTelCaja" style="margin-bottom:12px"></div>
       <label class="campo"><span>Cantidad cobrada${c.ultimoPago?' <span class="opcional">(la de su último pago; cámbiala si pagó otra)</span>':''}</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${esc(c.ultimoPago||'')}"></label>
@@ -2093,6 +2095,7 @@ async function llegada(c,manual){
     ]});
   if(r.pago){ registrarCobro(c,r.pago); return; }
   if(r.noPago){ const m=await pedirMotivo(c.nombre); if(m){ cancelarCobro(c,m); return; } }
+  if(r.seguir) quitarLlegada([c.id]);
   if(NAV){ NAV.llegado=false; NAV.pausaLlegada=Date.now()+90000; }
 }
 
@@ -2163,6 +2166,7 @@ async function llegadaCasa(c,grupo){
     for(const x of r.res) if(x.noPago){ const m=await pedirMotivo(x.c.nombre); if(!m){ return llegadaCasa(c,grupo); } x.motivo=m; }
     return registrarCasa(r.res);
   }
+  quitarLlegada(grupo.map(x=>x.id));
   if(NAV){ NAV.llegado=false; NAV.pausaLlegada=Date.now()+90000; }
 }
 /* Registra a todos los de la casa y manda un solo reporte de WhatsApp:
@@ -2171,14 +2175,15 @@ async function registrarCasa(res){
   const pos=posicionReporte(), ahora=new Date().toISOString(), hoy=fechaISO(new Date());
   for(const x of res){
     const k=cliente(x.c.id)||x.c;
-    if(x.noPago) R.cancelados.push({id:k.id,nombre:k.nombre,motivo:x.motivo,hora:ahora});
-    else R.cobros.push({id:k.id,nombre:k.nombre,monto:x.monto,hora:ahora,antes:{ultimoPago:k.ultimoPago??null,teniaHoy:(k.pagos||[]).includes(hoy)}});
+    x.espera=esperaDe(k.id); const ex=x.espera!=null?{llego:R.llegadas[k.id],espera:x.espera}:{};
+    if(x.noPago) R.cancelados.push({id:k.id,nombre:k.nombre,motivo:x.motivo,hora:ahora,...ex});
+    else R.cobros.push({id:k.id,nombre:k.nombre,monto:x.monto,hora:ahora,...ex,antes:{ultimoPago:k.ultimoPago??null,teniaHoy:(k.pagos||[]).includes(hoy)}});
   }
   const ids=res.map(x=>x.c.id);
   R.pendientes=R.pendientes.filter(id=>!ids.includes(id)); R.actual=null; guardarRuta(); pintarTotal();
   const total=res.reduce((t,x)=>t+(x.monto||0),0), pagaron=res.filter(x=>!x.noPago).length;
   pantallaRegistrado(pagaron?`Cobro de ${fmt(total)} registrado`:'Cobros cancelados',res.map(x=>x.c.nombre).join(' · '));
-  for(const x of res) if(!x.noPago) await recordarPago(x.c,x.monto);
+  for(const x of res) if(!x.noPago) await recordarPago(x.c,x.monto,x.espera);
   if(whatsActivo()){
     const p=await pos, lineas=[];
     if(p) lineas.push(`https://maps.google.com/?q=${p.lat.toFixed(7)},${p.lng.toFixed(7)}`);
@@ -2231,29 +2236,39 @@ function esperarRegreso(){
     setTimeout(()=>{ if(document.visibilityState==='visible') fin(); else document.addEventListener('visibilitychange',ver); },1500);
   });
 }
-async function recordarPago(c,monto){
+async function recordarPago(c,monto,espera){
   const x=cliente(c.id); if(!x) return;
   const hoy=fechaISO(new Date());
   const pagos=[...new Set([...(x.pagos||[]),hoy])].sort().slice(-24);
-  const u={...x,ultimoPago:monto,pagos}; await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===u.id)]=u;
+  const u={...x,ultimoPago:monto,pagos};
+  if(espera!=null) u.esperas=[...(x.esperas||[]),espera].slice(-10);   // cuánto tardó en pagar (últimas 10 visitas)
+  await DB.poner('clientes',u); clientes[clientes.findIndex(y=>y.id===u.id)]=u;
 }
+/* ---- Tiempo de espera: desde que llegas con el cliente hasta que registras el cobro ---- */
+function marcarLlegada(ids){ R.llegadas=R.llegadas||{}; const t=new Date().toISOString(); ids.forEach(id=>{ if(!R.llegadas[id]) R.llegadas[id]=t; }); guardarRuta(); }
+function quitarLlegada(ids){ if(!R.llegadas) return; ids.forEach(id=>delete R.llegadas[id]); guardarRuta(); }
+/* segundos que pasaron desde la llegada (nada si no hubo llegada o si pasó demasiado tiempo) */
+function esperaDe(id){ const t=R.llegadas&&R.llegadas[id]; if(!t) return null; const s=Math.round((Date.now()-new Date(t))/1000); return s>=0&&s<=3*3600?s:null; }
+function textoEspera(s){ if(s==null) return ''; if(s<60) return 'menos de 1 min'; const m=Math.round(s/60); return m<60?`${m} min`:`${Math.floor(m/60)} h ${m%60} min`; }
+function promedioEspera(c){ const e=(c&&c.esperas)||[]; return e.length?Math.round(e.reduce((a,b)=>a+b,0)/e.length):null; }
 async function registrarCobro(c,monto){
   monto=Math.round(monto*100)/100;
   const pos=posicionReporte();
-  const x=cliente(c.id)||c, hoy=fechaISO(new Date());
+  const x=cliente(c.id)||c, hoy=fechaISO(new Date()), espera=esperaDe(c.id);
   R.cobros.push({id:c.id,nombre:c.nombre,monto,hora:new Date().toISOString(),
+    ...(espera!=null?{llego:R.llegadas[c.id],espera}:{}),
     antes:{ultimoPago:x.ultimoPago??null,teniaHoy:(x.pagos||[]).includes(hoy)}});
   R.pendientes=R.pendientes.filter(x=>x!==c.id); R.actual=null; guardarRuta(); pintarTotal();
   pantallaRegistrado(`Cobro de ${fmt(monto)} registrado`,c.nombre);
-  recordarPago(c,monto);
+  recordarPago(c,monto,espera);
   // Primero WhatsApp; la voz y el siguiente cliente, ya de regreso en la app (para que no se corten)
   await enviarWhats(await pos,c,String(monto%1?monto.toFixed(2):monto));
   hablar(`Cobro de ${Math.round(monto)} pesos registrado.`);
   mostrarEleccion(true);
 }
 async function cancelarCobro(c,motivo){
-  const pos=posicionReporte(), yo=yoAhora();
-  R.cancelados.push({id:c.id,nombre:c.nombre,motivo,hora:new Date().toISOString()});
+  const pos=posicionReporte(), yo=yoAhora(), espera=esperaDe(c.id);
+  R.cancelados.push({id:c.id,nombre:c.nombre,motivo,hora:new Date().toISOString(),...(espera!=null?{llego:R.llegadas[c.id],espera}:{})});
   R.pendientes=R.pendientes.filter(x=>x!==c.id); R.actual=null; guardarRuta();
   // Si cancelaste antes de llegar, la ruta se vuelve a armar desde donde estás.
   // (Si ya estabas en su casa, se sigue con el que tocaba.)
@@ -2311,7 +2326,7 @@ async function finalizarRuta(){
 /* Todos los clientes de una ruta en un solo listado: cobrados, cancelados y no visitados */
 function itemsRuta(r,enCurso){
   const it=[];
-  r.cobros.forEach((c,i)=>it.push({k:'c'+i,tipo:'cobro',id:c.id,nombre:c.nombre,monto:c.monto,hora:c.hora}));
+  r.cobros.forEach((c,i)=>it.push({k:'c'+i,tipo:'cobro',id:c.id,nombre:c.nombre,monto:c.monto,hora:c.hora,espera:c.espera}));
   r.cancelados.forEach((c,i)=>it.push({k:'x'+i,tipo:'cancelado',id:c.id,nombre:c.nombre,motivo:c.motivo,hora:c.hora}));
   if(enCurso) r.pendientes.forEach((id,i)=>{ const c=cliente(id); if(c) it.push({k:'p'+i,tipo:'pendiente',id,nombre:c.nombre,hora:''}); });
   else r.pendientes.forEach((n,i)=>it.push({k:'p'+i,tipo:'pendiente',id:(r.pendIds||[])[i],nombre:n,hora:''}));
@@ -2330,7 +2345,7 @@ function ordenarItems(items,modo,orden){
 }
 function renglonVisita(x,num){
   const marca=x.tipo==='cobro'?'✓':x.tipo==='cancelado'?'✗':'○';
-  const sub=x.tipo==='cobro'?hora(x.hora):x.tipo==='cancelado'?`${esc(x.motivo)} · ${hora(x.hora)}`:'';
+  const sub=x.tipo==='cobro'?hora(x.hora)+(x.espera!=null?` · ⏱️ tardó ${textoEspera(x.espera)}`:''):x.tipo==='cancelado'?`${esc(x.motivo)} · ${hora(x.hora)}`:'';
   const der=x.tipo==='cobro'?fmt(x.monto):x.tipo==='cancelado'?'<span class="chip rojo">Cancelado</span>':'<span class="chip">No visitado</span>';
   return `<div class="renglon toque" data-visita="${x.k}"><div class="izq">${num?`<span class="num">${num}.</span> `:''}${marca} ${esc(x.nombre)}${sub?`<small>${sub}</small>`:''}</div><div class="der">${der}</div></div>`;
 }
@@ -2338,7 +2353,7 @@ function textoResumen(r){
   const items=ordenarItems(itemsRuta(r,false),modoOrden(r),r.orden);
   let t=`GRUPO ALFA COBRANZA\nResumen de ruta – ${fechaLarga(r.fin)}\n${hora(r.inicio)} a ${hora(r.fin)}\n\nTOTAL COBRADO: ${fmt(r.total)}\n`;
   t+=`Cobrados: ${r.cobros.length}${r.cancelados.length?` · Cancelados: ${r.cancelados.length}`:''}${r.pendientes.length?` · No visitados: ${r.pendientes.length}`:''}\n\n`;
-  t+=items.map((x,i)=>`${i+1}. ${x.nombre} – ${x.tipo==='cobro'?`${fmt(x.monto)} (${hora(x.hora)})`:x.tipo==='cancelado'?`Cancelado: ${x.motivo}`:'No visitado'}`).join('\n')+'\n';
+  t+=items.map((x,i)=>`${i+1}. ${x.nombre} – ${x.tipo==='cobro'?`${fmt(x.monto)} (${hora(x.hora)}${x.espera!=null?`, tardó ${textoEspera(x.espera)}`:''})`:x.tipo==='cancelado'?`Cancelado: ${x.motivo}`:'No visitado'}`).join('\n')+'\n';
   return t;
 }
 function mostrarResumen(r,recien=false){
