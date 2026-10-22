@@ -338,7 +338,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v41';
+const APP_VERSION='v42';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -2083,7 +2083,7 @@ async function llegada(c,manual){
       <label class="campo"><span>Cantidad cobrada${c.ultimoPago?' <span class="opcional">(la de su último pago; cámbiala si pagó otra)</span>':''}</span><input id="dMonto" class="monto" type="text" inputmode="decimal" placeholder="$0.00" autocomplete="off" value="${esc(c.ultimoPago||'')}"></label>
       <input type="file" id="dFotoIn" accept="image/*" capture="environment" class="oculto">`,
     alAbrir:v=>{
-      prepararFotoTel(v,c); botonEsperar(v,c.nombre);
+      prepararFotoTel(v,c); botonEsperar(v,c.nombre); relojEspera(v,c.id);
       // Si no hay cantidad sugerida, el cursor queda listo para escribirla
       if(!c.ultimoPago) setTimeout(()=>{ const x=v.querySelector('#dMonto'); x.focus(); x.select(); },250);
     },
@@ -2108,7 +2108,8 @@ function botonEsperar(v,nombre){
     let p=$('#esperaCobro'); if(p) p.remove();
     p=document.createElement('button'); p.id='esperaCobro'; p.className='esperaCobro';
     p.innerHTML=`<span style="font-size:24px">💵</span><span style="flex:1;min-width:0">Registrar cobro<small>${esc(nombre)}</small></span><span>▲</span>`;
-    p.onclick=()=>reabrirLlegada(); document.body.appendChild(p); };
+    p.onclick=()=>reabrirLlegada(); document.body.appendChild(p);
+    const idE=R.actual, sm=p.querySelector('small'), t=setInterval(()=>{ if(!document.body.contains(p)) return clearInterval(t); const e=esperaDe(idE); if(e!=null) sm.textContent=`${nombre} · ⏱️ ${textoEspera(e)}`; },1000); };
   const caja=v.querySelector('.botones'); caja.insertBefore(b,caja.firstChild);
 }
 function reabrirLlegada(){ const v=document.querySelector('.velo.esperando'); if(v) v.classList.remove('esperando'); const p=$('#esperaCobro'); if(p) p.remove(); asegurarAtras(); return !!v; }
@@ -2149,7 +2150,7 @@ async function llegadaCasa(c,grupo){
     titulo:'📍 Llegamos a la casa', texto:`Aquí se cobra a <b>${grupo.length}</b> personas. Escribe cuánto pagó cada una (o marca <b>No pagó</b>).`,
     html:`<div id="dFotoCaja" style="margin-bottom:10px"></div><div class="fila" id="dTelCaja" style="margin-bottom:12px"></div>${filas}
       <input type="file" id="dFotoIn" accept="image/*" capture="environment" class="oculto">`,
-    alAbrir:v=>{ prepararFotoTel(v,c); botonEsperar(v,grupo.map(x=>x.nombre).join(' · '));
+    alAbrir:v=>{ prepararFotoTel(v,c); botonEsperar(v,grupo.map(x=>x.nombre).join(' · ')); relojEspera(v,c.id);
       v.querySelectorAll('[data-k]').forEach(t=>{ const chk=t.querySelector('.dNoPago'), inp=t.querySelector('.dMontoC');
         chk.onchange=()=>{ inp.disabled=chk.checked; inp.style.opacity=chk.checked?.4:1; }; }); },
     botones:[
@@ -2249,7 +2250,16 @@ function marcarLlegada(ids){ R.llegadas=R.llegadas||{}; const t=new Date().toISO
 function quitarLlegada(ids){ if(!R.llegadas) return; ids.forEach(id=>delete R.llegadas[id]); guardarRuta(); }
 /* segundos que pasaron desde la llegada (nada si no hubo llegada o si pasó demasiado tiempo) */
 function esperaDe(id){ const t=R.llegadas&&R.llegadas[id]; if(!t) return null; const s=Math.round((Date.now()-new Date(t))/1000); return s>=0&&s<=3*3600?s:null; }
-function textoEspera(s){ if(s==null) return ''; if(s<60) return 'menos de 1 min'; const m=Math.round(s/60); return m<60?`${m} min`:`${Math.floor(m/60)} h ${m%60} min`; }
+function textoEspera(s){ if(s==null) return ''; s=Math.round(s); if(s<60) return `${s} s`;
+  const m=Math.floor(s/60), seg=s%60; if(m<60) return `${m} min ${seg} s`; return `${Math.floor(m/60)} h ${m%60} min`; }
+/* Contador en vivo en la ventana de llegada (se calcula con la hora de llegada guardada,
+   así que sigue contando aunque bloquees el teléfono o cambies de app) */
+function relojEspera(v,id){
+  const el=document.createElement('div'); el.style.cssText='text-align:center;font-weight:800;color:var(--azul);margin:-4px 0 10px';
+  const caja=v.querySelector('.dialogo'); caja.insertBefore(el,caja.querySelector('#dFotoCaja'));
+  const pinta=()=>{ if(!document.body.contains(v)) return clearInterval(t); const e=esperaDe(id); el.textContent=e!=null?`⏱️ Esperando: ${textoEspera(e)}`:''; };
+  const t=setInterval(pinta,1000); pinta();
+}
 function promedioEspera(c){ const e=(c&&c.esperas)||[]; return e.length?Math.round(e.reduce((a,b)=>a+b,0)/e.length):null; }
 async function registrarCobro(c,monto){
   monto=Math.round(monto*100)/100;
