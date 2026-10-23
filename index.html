@@ -338,7 +338,7 @@ a.btn{text-decoration:none}
 <script>
 'use strict';
 /* Versión de la app: súbela en cada cambio (y la de sw.js para que coincidan) */
-const APP_VERSION='v43';
+const APP_VERSION='v44';
 document.getElementById('versionApp').textContent=APP_VERSION;
 /* ================= Utilidades ================= */
 const $ = s => document.querySelector(s);
@@ -2196,7 +2196,7 @@ async function registrarCasa(res){
     try{ if(navigator.share){ await navigator.share({text:texto}); await esperarRegreso(); } else { window.open('https://wa.me/?text='+encodeURIComponent(texto),'_blank'); await esperarRegreso(); } }
     catch(e){}
   }
-  hablar(pagaron?`Cobro de ${Math.round(total)} pesos registrado, ${pagaron} de ${res.length} personas.`:'Cobros cancelados.');
+  hablar(pagaron?`Cobro registrado, ${pagaron} de ${res.length} personas.`:'Cobros cancelados.');
   mostrarEleccion(true);
 }
 
@@ -2283,7 +2283,7 @@ async function registrarCobro(c,monto){
   recordarPago(c,monto,espera);
   // Primero WhatsApp; la voz y el siguiente cliente, ya de regreso en la app (para que no se corten)
   await enviarWhats(await pos,c,String(monto%1?monto.toFixed(2):monto));
-  hablar(`Cobro de ${Math.round(monto)} pesos registrado.`);
+  hablar('Cobro registrado.');
   mostrarEleccion(true);
 }
 async function cancelarCobro(c,motivo){
@@ -2337,7 +2337,7 @@ async function finalizarRuta(){
     total:R.cobros.reduce((s,c)=>s+c.monto,0)};
   await DB.poner('rutas',reg); rutas.push(reg);
   R=rutaVacia(); guardarRuta(); pintarTotal();
-  hablar(`Ruta terminada. Total cobrado: ${Math.round(reg.total)} pesos.`);
+  hablar('Ruta terminada.');
   cerrarPantallaRuta();
   mostrarResumen(reg,true);
   if(tabActual==='ruta') pintarArmado();
